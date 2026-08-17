@@ -12,13 +12,27 @@ SOURCE_REPO = "click"
 PR_STATE = "all"
 
 
+# Env var names that may hold the GitHub token. Linux (and therefore Render) treats
+# env var names as case-sensitive, unlike Windows, so a token saved as `Github_token`
+# is invisible to a plain os.environ["GITHUB_TOKEN"] lookup there.
+GITHUB_TOKEN_NAMES = ("GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT")
+
+
+def get_github_token() -> str | None:
+    """Resolve the GitHub token from env, tolerating any capitalization."""
+    for name, value in os.environ.items():
+        if name.upper() in GITHUB_TOKEN_NAMES and value.strip():
+            return value.strip()
+    return None
+
+
 def github_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
     headers = {
         "Accept": accept,
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    token = os.environ.get("GITHUB_TOKEN")
+    token = get_github_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -61,8 +75,7 @@ def post_pr_comment(owner: str, repo: str, pr_number: int, body: str) -> dict:
 
     Requires GITHUB_TOKEN to be set with `repo` (or fine-grained `pull_requests: write`) scope.
     """
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
+    if not get_github_token():
         raise RuntimeError("Set GITHUB_TOKEN in .env before posting comments.")
 
     url = f"{GITHUB_API}/repos/{owner}/{repo}/issues/{pr_number}/comments"

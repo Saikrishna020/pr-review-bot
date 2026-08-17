@@ -1,22 +1,65 @@
 import hashlib
 import hmac
+import logging
 import os
+from contextlib import asynccontextmanager
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from fetch_real_pr_diff import get_pr_diff
+from fetch_real_pr_diff import get_github_token, get_pr_diff, github_headers
 from review_real_pr import maybe_post_review, review_diff
 
 load_dotenv()
+
+log = logging.getLogger("uvicorn.error")
 
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 
 # GitHub events that mean "there's new/changed code to review" for a PR.
 REVIEWABLE_ACTIONS = {"opened", "synchronize", "reopened"}
 
-app = FastAPI(title="PR Review Bot")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Surface config problems in the logs at boot, rather than as a 500 on first use.
+
+    An unauthenticated GitHub client still "works" until it hits the 60/hour shared-IP
+    limit, so a missing token has to be stated explicitly to be noticed.
+    """
+    log.info(
+        "PR Review Bot starting | commit=%s github_token=%s deepseek_key=%s "
+        "target=%s/%s post_comments=%s webhook_secret=%s",
+        os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
+        "found" if get_github_token() else "MISSING (GitHub calls will be rate-limited)",
+        "found" if os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("Deepseek_api") else "MISSING",
+        os.environ.get("TARGET_OWNER", "unset"),
+        os.environ.get("TARGET_REPO", "unset"),
+        os.environ.get("POST_COMMENTS", "false"),
+        "set" if WEBHOOK_SECRET else "unset (signature checks skipped)",
+    )
+    yield
+
+
+app = FastAPI(title="PR Review Bot", lifespan=lifespan)
+
+
+def _github_error_detail(exc: httpx.HTTPStatusError) -> str:
+    """Turn a raw GitHub HTTP error into something actionable in the response body."""
+    status = exc.response.status_code
+    if status == 403 and "rate limit" in exc.response.text.lower():
+        if not get_github_token():
+            return (
+                "GitHub rate limit hit and no token was found in the environment. "
+                "Set GITHUB_TOKEN and make sure the service actually restarted afterwards."
+            )
+        return "GitHub rate limit hit even though a token was found; check the token's validity."
+    if status in (401, 403):
+        return f"GitHub rejected the credentials ({status}). Check GITHUB_TOKEN's value and scopes."
+    if status == 404:
+        return "PR or repo not found (or the token can't see it)."
+    return f"GitHub returned {status}."
 
 
 class ReviewRequest(BaseModel):
@@ -33,21 +76,19 @@ def health() -> dict:
 
 @app.get("/debug/github-auth")
 def debug_github_auth() -> dict:
-    """Temporary: confirm the deployed process actually sees GITHUB_TOKEN and that
-    it authenticates, without ever exposing the full token value. Remove once the
-    Render env var mystery is solved."""
-    import httpx
-
-    from fetch_real_pr_diff import github_headers
-
-    raw = os.environ.get("GITHUB_TOKEN")
-    r = httpx.get("https://api.github.com/rate_limit", headers=github_headers(), timeout=15)
-    core = r.json().get("resources", {}).get("core", {})
+    """Confirm the running process can actually see and use a GitHub token, without
+    ever exposing the token value. `commit` identifies which build is live, so a
+    stale deploy is obvious rather than being mistaken for a config problem."""
+    token = get_github_token()
+    response = httpx.get(
+        "https://api.github.com/rate_limit", headers=github_headers(), timeout=15
+    )
     return {
-        "token_env_var_set": bool(raw),
-        "token_length": len(raw) if raw else 0,
-        "token_prefix": raw[:7] if raw else None,
-        "rate_limit_seen_by_app": core,
+        "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
+        "token_found": bool(token),
+        "token_length": len(token) if token else 0,
+        "authenticated": response.json().get("resources", {}).get("core", {}).get("limit") != 60,
+        "rate_limit": response.json().get("resources", {}).get("core", {}),
     }
 
 
@@ -59,7 +100,11 @@ def review(request: ReviewRequest) -> dict:
     Set post=true to also post the review as a PR comment (still subject
     to the POST_COMMENTS env flag and the blocked-target guard).
     """
-    diff = get_pr_diff(request.owner, request.repo, request.pr_number)
+    try:
+        diff = get_pr_diff(request.owner, request.repo, request.pr_number)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=_github_error_detail(exc)) from exc
+
     result = review_diff(diff)
 
     if request.post:
