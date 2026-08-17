@@ -31,6 +31,26 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/debug/github-auth")
+def debug_github_auth() -> dict:
+    """Temporary: confirm the deployed process actually sees GITHUB_TOKEN and that
+    it authenticates, without ever exposing the full token value. Remove once the
+    Render env var mystery is solved."""
+    import httpx
+
+    from fetch_real_pr_diff import github_headers
+
+    raw = os.environ.get("GITHUB_TOKEN")
+    r = httpx.get("https://api.github.com/rate_limit", headers=github_headers(), timeout=15)
+    core = r.json().get("resources", {}).get("core", {})
+    return {
+        "token_env_var_set": bool(raw),
+        "token_length": len(raw) if raw else 0,
+        "token_prefix": raw[:7] if raw else None,
+        "rate_limit_seen_by_app": core,
+    }
+
+
 @app.post("/review")
 def review(request: ReviewRequest) -> dict:
     """Manual trigger: review one PR on demand and return the JSON result.
