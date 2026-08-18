@@ -129,9 +129,19 @@ def _verify_signature(raw_body: bytes, signature_header: str | None) -> None:
 
 
 def _run_review_and_post(owner: str, repo: str, pr_number: int) -> None:
-    diff = get_pr_diff(owner, repo, pr_number)
-    result = review_diff(diff)
-    maybe_post_review(owner, repo, pr_number, result)
+    """Runs after the webhook response has already been sent, so an exception here
+    would otherwise vanish silently while GitHub still shows a green delivery."""
+    target = f"{owner}/{repo}#{pr_number}"
+    try:
+        log.info("Reviewing %s", target)
+        diff = get_pr_diff(owner, repo, pr_number)
+        result = review_diff(diff)
+        log.info("Review of %s found %d issue(s)", target, len(result.get("issues", [])))
+        maybe_post_review(owner, repo, pr_number, result)
+    except httpx.HTTPStatusError as exc:
+        log.error("Review of %s failed: %s", target, _github_error_detail(exc))
+    except Exception:
+        log.exception("Review of %s failed unexpectedly", target)
 
 
 @app.post("/webhook")
