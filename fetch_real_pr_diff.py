@@ -115,12 +115,20 @@ def get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -
     return response.text
 
 
-def search_code(owner: str, repo: str, identifier: str) -> list[str]:
+def search_code(owner: str, repo: str, identifier: str) -> tuple[list[str], bool]:
     """Finds files in `owner/repo` whose text mentions `identifier`, via GitHub's
-    code search. Only indexes the default branch and is rate-limited (~10
-    requests/minute authenticated) — on a rate limit or a rejected query, this
-    degrades to "no candidates found" rather than raising, since caller/subclass
-    context is a nice-to-have, not something a review should fail over.
+    code search. Returns (paths, degraded).
+
+    Only indexes the default branch and is rate-limited (~10 requests/minute
+    authenticated) — on a rate limit or a rejected query, this degrades to "no
+    candidates found" rather than raising, since caller/subclass context is a
+    nice-to-have, not something a review should fail over.
+
+    `degraded` is True when the empty list means "the search failed" rather
+    than "there are genuinely no matches". Callers must not report an empty
+    degraded result as a confirmed absence — that's indistinguishable from
+    "no callers exist" to a reader, which is exactly the wrong thing to tell
+    a reviewer.
 
     Scoped to `extension:py` since parsing is Python-only right now — without
     it, a common identifier gets crowded out by docs/README hits before any
@@ -133,9 +141,9 @@ def search_code(owner: str, repo: str, identifier: str) -> list[str]:
 
     response = httpx.get(url, headers=github_headers(), params=params, timeout=30)
     if response.status_code in (403, 422):
-        return []
+        return [], True
     response.raise_for_status()
-    return [item["path"] for item in response.json().get("items", [])]
+    return [item["path"] for item in response.json().get("items", [])], False
 
 
 def post_pr_comment(owner: str, repo: str, pr_number: int, body: str) -> dict:

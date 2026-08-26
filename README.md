@@ -56,7 +56,12 @@ The ticket is a third input to the *same* review call, not a separate check bolt
 
 Case 4 is the one that matters most. Its acceptance-criteria bullets cover only 422/403 handling; the requirement to distinguish "code search hit its 1000-result cap" from "the symbol doesn't exist" appears only in the description's prose. A reviewer that skims the bullet list marks it done. The bot caught it and listed it as a missing requirement.
 
-Not yet covered: the truncation interaction — a diff large enough to trip Phase 2's caps must not produce a confident `satisfies`. Every golden-set case runs with `context=None` to isolate ticket judgement from the context pipeline, so that check needs a real PR and is the next gap to close.
+**Truncation case (verified on a real PR).** The golden-set cases above all run with `context=None`, to isolate ticket judgement from the context pipeline. The remaining question — does a diff large enough to trip Phase 2's caps avoid a confident `satisfies`? — was checked against a real PR ([#1](https://github.com/Saikrishna020/pr-review-bot/pull/1), linked to SCRUM-7, 102 changed symbols against a cap of 5). Result: `context_truncated=True` and the verdict hedged to `partial` rather than `satisfies`, as intended.
+
+That run also turned up two real bugs in this codebase, both since fixed:
+
+- **A data race.** `code_graph` held one module-level tree-sitter `Parser` shared across `pr_context`'s 16-worker pool. tree-sitter parsers aren't safe to call `.parse()` on concurrently. Parsers are now thread-local, with a regression test that runs 64 concurrent parses.
+- **Silent degradation.** A rate-limited code search or a failed file fetch produced context that was quietly incomplete but presented as complete — so an empty callers list read as "nothing calls this" rather than "we couldn't look". `search_code` now returns a `degraded` flag, failed file fetches are tracked, and both feed `RepoContext.truncated` and add an explicit note to the context text.
 
 ## Project layout
 

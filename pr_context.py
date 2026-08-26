@@ -184,7 +184,8 @@ def find_references(owner: str, repo: str, symbol: Symbol, symbol_file: str, poo
     Runs its own short-lived pool if `pool` isn't supplied (e.g. from eval code
     calling this directly); `build_context` passes its shared one instead.
     """
-    candidates = [p for p in search_code(owner, repo, symbol.name) if p != symbol_file][:MAX_SEARCH_CANDIDATES]
+    matches, _degraded = search_code(owner, repo, symbol.name)
+    candidates = [p for p in matches if p != symbol_file][:MAX_SEARCH_CANDIDATES]
     if not candidates:
         return [], []
 
@@ -236,6 +237,11 @@ def build_context(owner: str, repo: str, diff: str, head_sha: str, budget_chars:
         changed_symbols: list[tuple[Symbol, str]] = []
         import_tasks: list[tuple[str, Import]] = []
 
+        # Every entry here is a .py file we intended to parse, so a None means
+        # the fetch or parse actually failed — that file's symbols are missing
+        # from the context and the reader has to be told.
+        failed_files = [f.path for f, parsed in zip(diff_files, parsed_files) if parsed is None]
+
         for diff_file, parsed in zip(diff_files, parsed_files):
             if parsed is None:
                 continue
@@ -265,17 +271,18 @@ def build_context(owner: str, repo: str, diff: str, head_sha: str, budget_chars:
         symbols_to_search = changed_symbols[:MAX_CHANGED_SYMBOLS]
         skipped_symbols = changed_symbols[MAX_CHANGED_SYMBOLS:]
 
-        def _search_symbol(item: tuple[Symbol, str]) -> tuple[list[str], int]:
+        def _search_symbol(item: tuple[Symbol, str]) -> tuple[list[str], int, bool]:
             symbol, symbol_file = item
-            matches = [p for p in search_code(owner, repo, symbol.name) if p != symbol_file]
-            return matches[:MAX_SEARCH_CANDIDATES], len(matches)
+            found, degraded = search_code(owner, repo, symbol.name)
+            matches = [p for p in found if p != symbol_file]
+            return matches[:MAX_SEARCH_CANDIDATES], len(matches), degraded
 
         search_results = list(pool.map(_search_symbol, symbols_to_search))
 
         # Round 4: fetch+confirm every (symbol, candidate) pair in one flat batch.
         confirm_tasks = [
             (symbol, symbol_file, candidate)
-            for (symbol, symbol_file), (candidates, _total) in zip(symbols_to_search, search_results)
+            for (symbol, symbol_file), (candidates, _total, _degraded) in zip(symbols_to_search, search_results)
             for candidate in candidates
         ]
         confirm_results = pool.map(
@@ -291,9 +298,11 @@ def build_context(owner: str, repo: str, diff: str, head_sha: str, budget_chars:
             bucket = confirmed if is_confirmed else possible
             bucket.extend((path, line) for line in lines)
 
+        search_degraded = any(degraded for _c, _t, degraded in search_results)
+
         caller_blocks = []
         any_search_truncated = False
-        for (symbol, symbol_file), (candidates, total_matches) in zip(symbols_to_search, search_results):
+        for (symbol, symbol_file), (candidates, total_matches, _degraded) in zip(symbols_to_search, search_results):
             confirmed, possible = refs_by_symbol.get(id(symbol), ([], []))
             block = _format_references_block(symbol, symbol_file, confirmed, possible)
             truncated = total_matches > len(candidates)
@@ -312,6 +321,25 @@ def build_context(owner: str, repo: str, diff: str, head_sha: str, budget_chars:
             caller_blocks.append(block)
 
     truncation_note = ""
+
+    # A failed fetch/parse or a rate-limited search leaves the context quietly
+    # incomplete. Without saying so, an empty callers section reads as "nothing
+    # calls this" rather than "we couldn't look" — the opposite of the truth.
+    if failed_files:
+        log.warning("pr_context: could not fetch/parse %d changed file(s): %s",
+                    len(failed_files), ", ".join(failed_files))
+        truncation_note += (
+            f"\n\nNote: {len(failed_files)} changed file(s) could not be fetched or parsed "
+            f"({', '.join(failed_files)}), so their symbols and callers are missing entirely "
+            f"from the sections below."
+        )
+    if search_degraded:
+        log.warning("pr_context: at least one code search failed (rate limit or rejected query)")
+        truncation_note += (
+            "\n\nNote: at least one caller search failed (rate limit or rejected query). An "
+            "empty callers list below may mean 'the search failed', not 'no callers exist'."
+        )
+
     if skipped_symbols:
         log.info(
             "pr_context: changed-symbol cap reached — checked callers for %d/%d changed symbols",
@@ -347,7 +375,10 @@ def build_context(owner: str, repo: str, diff: str, head_sha: str, budget_chars:
         assembled.append(block_text)
         used_chars += len(block_text)
 
-    truncated = bool(skipped_symbols) or any_search_truncated or budget_truncated
+    truncated = (
+        bool(skipped_symbols) or any_search_truncated or budget_truncated
+        or bool(failed_files) or search_degraded
+    )
 
     if not assembled:
         return RepoContext(text="", truncated=truncated)

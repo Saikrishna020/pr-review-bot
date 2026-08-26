@@ -2,7 +2,10 @@
 structured-data-out, no network calls.
 """
 
-from pr_context import parse_changed_files
+from concurrent.futures import ThreadPoolExecutor
+
+from code_graph import parse_python_source
+from pr_context import RepoContext, parse_changed_files
 
 SIMPLE_DIFF = """\
 diff --git a/foo.py b/foo.py
@@ -102,6 +105,29 @@ def test_deleted_file_produces_no_changed_file_entry():
 def test_b_prefix_is_stripped_from_path():
     files = parse_changed_files(SIMPLE_DIFF)
     assert files[0].path == "foo.py"  # not "b/foo.py"
+
+
+def test_repo_context_is_falsy_when_empty_so_callers_can_test_truthiness():
+    # main.py / review_real_pr.py do `if context:` — an empty context must
+    # read as "no context", not as a present-but-blank object.
+    assert not RepoContext(text="")
+    assert RepoContext(text="something")
+    # Truncation alone doesn't make an empty context meaningful.
+    assert not RepoContext(text="", truncated=True)
+
+
+def test_parsing_is_thread_safe():
+    # Regression test: code_graph used one module-level tree-sitter Parser
+    # shared across pr_context's thread pool. A tree-sitter Parser is not safe
+    # to call .parse() on concurrently, so this raced. Parsers are now
+    # thread-local.
+    source = "class A:\n    def m(self):\n        return helper()\n\ndef helper():\n    return 1\n"
+    expected = len(parse_python_source(source).symbols)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        counts = [len(p.symbols) for p in pool.map(lambda _: parse_python_source(source), range(64))]
+
+    assert set(counts) == {expected}
 
 
 def test_blank_context_line_still_advances_line_count():

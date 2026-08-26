@@ -6,6 +6,7 @@ fetched from the GitHub API, one file at a time.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -55,16 +56,22 @@ def _text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
-_parser = None
-_query = None
+# One parser per thread, not one shared globally. `parse_python_source` is
+# called concurrently from pr_context's thread pool, and a tree-sitter Parser
+# is not safe to call .parse() on from multiple threads at once — sharing one
+# is a data race, not just a lock-contention issue. Thread-local storage also
+# removes the race on lazy initialisation itself.
+_local = threading.local()
 
 
 def _load():
-    global _parser, _query
-    if _parser is None:
-        _parser = get_parser("python")
-        _query = get_language("python").query(QUERY_PATH.read_text(encoding="utf-8"))
-    return _parser, _query
+    parser = getattr(_local, "parser", None)
+    if parser is None:
+        parser = get_parser("python")
+        query = get_language("python").query(QUERY_PATH.read_text(encoding="utf-8"))
+        _local.parser = parser
+        _local.query = query
+    return parser, _local.query
 
 
 def _extract_definitions(query, root, source: bytes) -> list[Symbol]:
