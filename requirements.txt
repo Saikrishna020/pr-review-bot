@@ -3,3 +3,8 @@ uvicorn[standard]==0.52.3
 httpx==0.28.1
 openai==3.0.0
 python-dotenv==1.2.2
+tree_sitter==0.21.3
+tree_sitter_languages==1.10.2
+
+# dev-only, for tests/
+pytest==9.1.1

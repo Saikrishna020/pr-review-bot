@@ -11,10 +11,12 @@ from fetch_real_pr_diff import (
     list_closed_prs,
     post_pr_comment,
 )
+from jira_ticket import JiraTicket, resolve_ticket_for_pr
+from pr_context import RepoContext, safe_build_context
+from review_prompt import build_system_prompt, build_user_prompt
+from review_result import ReviewResult, parse_review_result
 
 load_dotenv()
-
-ALLOWED_SEVERITIES = {"high", "medium", "low"}
 
 # Where the bot should actually post comments. Defaults to the demo source
 # (pallets/click) ONLY for reading diffs; posting there is blocked below no
@@ -42,141 +44,103 @@ def get_deepseek_client() -> OpenAI:
     )
 
 
-def validate_review_json(raw_response: str) -> dict:
-    try:
-        parsed = json.loads(raw_response)
-    except json.JSONDecodeError:
-        return {
-            "issues": [],
-            "error": "DeepSeek did not return valid JSON.",
-            "raw": raw_response,
-        }
+def review_pr(
+    diff: str,
+    context: RepoContext | None = None,
+    ticket: JiraTicket | None = None,
+) -> ReviewResult:
+    """One LLM call producing both the code review and the Jira verdict.
 
-    if not isinstance(parsed, dict):
-        return {
-            "issues": [],
-            "error": "Review response must be a JSON object.",
-            "raw": raw_response,
-        }
-
-    issues = parsed.get("issues")
-    if not isinstance(issues, list):
-        return {
-            "issues": [],
-            "error": "Review response must contain an 'issues' list.",
-            "raw": raw_response,
-        }
-
-    valid_issues = []
-    invalid_issues = []
-
-    for issue in issues:
-        if not isinstance(issue, dict):
-            invalid_issues.append(issue)
-            continue
-
-        file_path = issue.get("file")
-        line = issue.get("line")
-        severity = issue.get("severity")
-        comment = issue.get("comment")
-
-        if not isinstance(file_path, str) or not file_path.strip():
-            invalid_issues.append(issue)
-            continue
-
-        if not isinstance(line, int) or line < 1:
-            invalid_issues.append(issue)
-            continue
-
-        if not isinstance(severity, str) or severity.lower() not in ALLOWED_SEVERITIES:
-            invalid_issues.append(issue)
-            continue
-
-        if not isinstance(comment, str) or not comment.strip():
-            invalid_issues.append(issue)
-            continue
-
-        valid_issues.append(
-            {
-                "file": file_path,
-                "line": line,
-                "severity": severity.lower(),
-                "comment": comment,
-            }
-        )
-
-    result = {"issues": valid_issues}
-    if invalid_issues:
-        result["warning"] = f"Skipped {len(invalid_issues)} invalid issue(s)."
-
-    return result
-
-
-def review_diff(diff: str) -> dict:
+    When no ticket resolved, the Jira half is dropped from the prompt entirely
+    and the verdict is set here rather than asked of the model.
+    """
     client = get_deepseek_client()
 
     response = client.chat.completions.create(
         model="deepseek-v4-flash",
         response_format={"type": "json_object"},
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are an experienced code reviewer. "
-                    "Find real bugs, security issues, missing edge cases, or bad logic in PR diffs. "
-                    "Prefer one high-signal comment over many low-value comments. "
-                    "\n\n"
-                    "You only see the diff, not the full repo, its issue tracker, its test suite, or "
-                    "any linked discussion. Do not make factual claims about how a library, framework, "
-                    "parser, or runtime behaves unless that behavior is directly visible in the diff "
-                    "itself (e.g. shown in a code comment, docstring, or test assertion that is part of "
-                    "the diff). This applies even if the behavior seems well-known to you — your training "
-                    "data may be stale or wrong for the exact version in this PR. "
-                    "If a potential issue depends on external behavior you cannot verify from the diff "
-                    "alone, either omit it, or phrase it as a question / suggestion to verify rather than "
-                    "an assertion (e.g. 'Consider confirming that X still does Y in the current version, "
-                    "and linking the source' instead of 'X does Y'). Never state as fact something you "
-                    "are inferring rather than reading. "
-                    "Return ONLY valid JSON with this shape: "
-                    '{"issues":[{"file":"path/to/file.py","line":123,"severity":"high|medium|low","comment":"feedback"}]}. '
-                    'If there are no issues, return {"issues":[]}.'
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Review this pull request diff and return JSON:\n\n{diff}",
-            },
+            {"role": "system", "content": build_system_prompt(ticket)},
+            {"role": "user", "content": build_user_prompt(diff, context=context, ticket=ticket)},
         ],
     )
 
-    raw_response = response.choices[0].message.content
-    return validate_review_json(raw_response)
+    result = parse_review_result(response.choices[0].message.content)
+
+    if ticket is None:
+        # Nothing to align against — don't let a stray model-invented verdict stand.
+        result.jira_verdict = "no_ticket_linked"
+        result.missing_requirements = []
+
+    # The model can't know what context it wasn't shown, so this is set from
+    # the pipeline rather than trusted from the response.
+    result.context_truncated = bool(context and context.truncated)
+
+    return result
 
 
-SEVERITY_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+SEVERITY_EMOJI = {"blocking": "🔴", "warning": "🟡", "note": "🟢"}
+
+VERDICT_DISPLAY = {
+    "satisfies": ("✅", "Satisfies the ticket"),
+    "partial": ("🟡", "Partially satisfies the ticket"),
+    "does_not_satisfy": ("❌", "Does not satisfy the ticket"),
+    "no_ticket_linked": ("⚪", "No Jira ticket linked"),
+}
 
 
-def format_review_comment(result: dict) -> str:
-    issues = result.get("issues", [])
+def format_review_comment(result: ReviewResult, ticket: JiraTicket | None = None) -> str:
+    lines = ["**PR Review Bot**"]
 
-    if not issues:
-        return "**PR Review Bot**\n\nNo issues found in this diff."
+    # Caveat goes at the top, not buried — it qualifies everything below it.
+    if result.context_truncated:
+        lines += [
+            "",
+            "> ⚠️ _Codebase context was truncated (lookup caps reached), so some callers or "
+            "usages may not have been checked. Findings and the ticket verdict below are "
+            "based on a partial view._",
+        ]
 
-    lines = [f"**PR Review Bot** found {len(issues)} issue(s):", ""]
-    for issue in issues:
-        emoji = SEVERITY_EMOJI.get(issue["severity"], "⚪")
-        lines.append(
-            f"- {emoji} **{issue['severity'].upper()}** `{issue['file']}:{issue['line']}` — {issue['comment']}"
-        )
-
-    if result.get("warning"):
+    lines.append("")
+    if result.issues:
+        lines.append(f"**Code review** — {len(result.issues)} finding(s):")
         lines.append("")
-        lines.append(f"_{result['warning']}_")
+        for issue in result.issues:
+            emoji = SEVERITY_EMOJI.get(issue.severity, "⚪")
+            location = f"`{issue.file}:{issue.line}`" if issue.line is not None else f"`{issue.file}`"
+            lines.append(f"- {emoji} **{issue.severity.upper()}** {location} — {issue.description}")
+    else:
+        lines.append("**Code review** — no issues found in this diff.")
+
+    emoji, label = VERDICT_DISPLAY.get(result.jira_verdict, ("⚪", result.jira_verdict))
+    lines += ["", "---", ""]
+    if ticket is not None:
+        ticket_ref = f"[{ticket.key}]({ticket.url})" if ticket.url else ticket.key
+        lines.append(f"**Jira alignment** ({ticket_ref} — {ticket.summary})")
+    else:
+        lines.append("**Jira alignment**")
+    lines += ["", f"{emoji} **{label}**"]
+
+    if result.missing_requirements:
+        lines += ["", "Not addressed:"]
+        lines += [f"- {requirement}" for requirement in result.missing_requirements]
+
+    if result.reasoning:
+        lines += ["", f"_{result.reasoning}_"]
+
+    if result.error:
+        lines += ["", f"_⚠️ {result.error}_"]
 
     return "\n".join(lines)
 
 
-def maybe_post_review(owner: str, repo: str, pr_number: int, result: dict) -> None:
+def maybe_post_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    result: ReviewResult,
+    ticket: JiraTicket | None = None,
+) -> None:
     if (owner, repo) in BLOCKED_TARGETS:
         print(f"Skipping comment post: {owner}/{repo} is a blocked demo target.")
         return
@@ -185,7 +149,7 @@ def maybe_post_review(owner: str, repo: str, pr_number: int, result: dict) -> No
         print("POST_COMMENTS is not enabled — skipping comment post (dry run).")
         return
 
-    body = format_review_comment(result)
+    body = format_review_comment(result, ticket)
     posted = post_pr_comment(owner, repo, pr_number, body)
     print(f"Posted comment: {posted.get('html_url', posted.get('url', '(no url returned)'))}")
 
@@ -205,22 +169,30 @@ def main() -> None:
 
     diff = get_pr_diff(TARGET_OWNER, TARGET_REPO, chosen_pr["number"])
     print(f"Diff length: {len(diff)} characters")
-    print("Sending real diff to DeepSeek...")
+
+    branch_ref = chosen_pr.get("head", {}).get("ref")
+    ticket = resolve_ticket_for_pr(branch_ref, chosen_pr.get("title"))
+    print(f"Jira ticket: {ticket.key} — {ticket.summary}" if ticket else "Jira ticket: none linked")
+
+    print("Fetching repo context (imports/callers/subclasses for what this diff touches)...")
+    context = safe_build_context(TARGET_OWNER, TARGET_REPO, diff, chosen_pr["head"]["sha"])
+    if context:
+        truncated_note = " (truncated)" if context.truncated else ""
+        print(f"Context: {len(context.text)} characters{truncated_note}")
+    else:
+        print("Context: none")
+    print("Sending diff + context + ticket to DeepSeek...")
     print()
 
-    result = review_diff(diff)
-    if result.get("error"):
-        print(f"Review failed safely: {result['error']}")
+    result = review_pr(diff, context=context, ticket=ticket)
+    if result.error:
+        print(f"Review degraded safely: {result.error}")
         print()
 
-    if result.get("warning"):
-        print(result["warning"])
-        print()
-
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result.model_dump(), indent=2))
     print()
 
-    maybe_post_review(TARGET_OWNER, TARGET_REPO, chosen_pr["number"], result)
+    maybe_post_review(TARGET_OWNER, TARGET_REPO, chosen_pr["number"], result, ticket)
 
 
 if __name__ == "__main__":

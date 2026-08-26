@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 import httpx
@@ -9,8 +10,10 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from fetch_real_pr_diff import get_github_token, get_pr_diff, github_headers
-from review_real_pr import maybe_post_review, review_diff
+from fetch_real_pr_diff import get_github_token, get_pr_diff, get_pr_head, github_headers
+from jira_ticket import JiraTicket, resolve_ticket_for_pr
+from pr_context import RepoContext, safe_build_context
+from review_real_pr import maybe_post_review, review_pr
 
 load_dotenv()
 
@@ -20,6 +23,32 @@ WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 
 # GitHub events that mean "there's new/changed code to review" for a PR.
 REVIEWABLE_ACTIONS = {"opened", "synchronize", "reopened"}
+
+
+def _safe_resolve_ticket(branch_ref: str | None, pr_title: str | None) -> JiraTicket | None:
+    """Ticket lookup that can never fail a review. `resolve_ticket_for_pr`
+    already returns None for the expected misses (no key, 404, bad auth); this
+    catches anything genuinely unexpected on top of that.
+    """
+    try:
+        return resolve_ticket_for_pr(branch_ref, pr_title)
+    except Exception:
+        log.warning("Jira ticket resolution failed for branch=%r; reviewing without it", branch_ref, exc_info=True)
+        return None
+
+
+def _gather_review_inputs(
+    owner: str, repo: str, diff: str, head_sha: str, branch_ref: str | None, pr_title: str | None
+) -> tuple[RepoContext | None, JiraTicket | None]:
+    """Fetches the Jira ticket while the (much slower) codebase context builds.
+
+    Threads rather than asyncio, matching Phase 2's existing concurrency
+    pattern — the whole GitHub/Jira layer is sync httpx.
+    """
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        context_future = pool.submit(safe_build_context, owner, repo, diff, head_sha)
+        ticket_future = pool.submit(_safe_resolve_ticket, branch_ref, pr_title)
+        return context_future.result(), ticket_future.result()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -102,15 +131,19 @@ def review(request: ReviewRequest) -> dict:
     """
     try:
         diff = get_pr_diff(request.owner, request.repo, request.pr_number)
+        head = get_pr_head(request.owner, request.repo, request.pr_number)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=_github_error_detail(exc)) from exc
 
-    result = review_diff(diff)
+    context, ticket = _gather_review_inputs(
+        request.owner, request.repo, diff, head.sha, head.ref, head.title
+    )
+    result = review_pr(diff, context=context, ticket=ticket)
 
     if request.post:
-        maybe_post_review(request.owner, request.repo, request.pr_number, result)
+        maybe_post_review(request.owner, request.repo, request.pr_number, result, ticket)
 
-    return result
+    return result.model_dump()
 
 
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> None:
@@ -128,16 +161,24 @@ def _verify_signature(raw_body: bytes, signature_header: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid webhook signature.")
 
 
-def _run_review_and_post(owner: str, repo: str, pr_number: int) -> None:
+def _run_review_and_post(
+    owner: str, repo: str, pr_number: int, head_sha: str,
+    branch_ref: str | None = None, pr_title: str | None = None,
+) -> None:
     """Runs after the webhook response has already been sent, so an exception here
     would otherwise vanish silently while GitHub still shows a green delivery."""
     target = f"{owner}/{repo}#{pr_number}"
     try:
-        log.info("Reviewing %s", target)
+        log.info("Reviewing %s (branch=%s)", target, branch_ref)
         diff = get_pr_diff(owner, repo, pr_number)
-        result = review_diff(diff)
-        log.info("Review of %s found %d issue(s)", target, len(result.get("issues", [])))
-        maybe_post_review(owner, repo, pr_number, result)
+        context, ticket = _gather_review_inputs(owner, repo, diff, head_sha, branch_ref, pr_title)
+        result = review_pr(diff, context=context, ticket=ticket)
+        log.info(
+            "Review of %s found %d issue(s), jira_verdict=%s (ticket=%s, context_truncated=%s)",
+            target, len(result.issues), result.jira_verdict,
+            ticket.key if ticket else "none", result.context_truncated,
+        )
+        maybe_post_review(owner, repo, pr_number, result, ticket)
     except httpx.HTTPStatusError as exc:
         log.error("Review of %s failed: %s", target, _github_error_detail(exc))
     except Exception:
@@ -163,10 +204,18 @@ async def webhook(request: Request, background_tasks: BackgroundTasks) -> dict:
 
     owner = payload["repository"]["owner"]["login"]
     repo = payload["repository"]["name"]
-    pr_number = payload["pull_request"]["number"]
+    pull_request = payload["pull_request"]
+    pr_number = pull_request["number"]
+    head_sha = pull_request["head"]["sha"]
+    # The webhook payload already carries the branch name and title, so the
+    # Jira key costs no extra API call here.
+    branch_ref = pull_request.get("head", {}).get("ref")
+    pr_title = pull_request.get("title")
 
     # Respond to GitHub immediately; the diff fetch + LLM review can take
     # longer than GitHub's webhook timeout, so do the real work after.
-    background_tasks.add_task(_run_review_and_post, owner, repo, pr_number)
+    background_tasks.add_task(
+        _run_review_and_post, owner, repo, pr_number, head_sha, branch_ref, pr_title
+    )
 
     return {"status": "accepted", "owner": owner, "repo": repo, "pr_number": pr_number}
