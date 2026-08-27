@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 
 import httpx
 from dotenv import load_dotenv
@@ -68,6 +69,81 @@ def get_pr_diff(owner: str, repo: str, pr_number: int) -> str:
     )
     response.raise_for_status()
     return response.text
+
+
+@dataclass
+class PRHead:
+    """The bits of a PR needed to review it: which commit to read files at,
+    and where a Jira ticket key might be written (branch name or title).
+    """
+
+    sha: str
+    ref: str | None  # head branch name, e.g. "SCRUM-1-add-validation"
+    title: str | None
+
+
+def get_pr_head(owner: str, repo: str, pr_number: int) -> PRHead:
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+
+    response = httpx.get(url, headers=github_headers(), timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    return PRHead(
+        sha=data["head"]["sha"],
+        ref=data.get("head", {}).get("ref"),
+        title=data.get("title"),
+    )
+
+
+def get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -> str | None:
+    """Fetches one file's raw text content at `ref` (a sha or branch name), or the
+    default branch if `ref` is None. Returns None if the file doesn't exist at
+    that ref (e.g. an import that resolves to a guessed path that isn't real).
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}"
+    params = {"ref": ref} if ref else {}
+
+    response = httpx.get(
+        url,
+        headers=github_headers(accept="application/vnd.github.v3.raw"),
+        params=params,
+        timeout=30,
+    )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.text
+
+
+def search_code(owner: str, repo: str, identifier: str) -> tuple[list[str], bool]:
+    """Finds files in `owner/repo` whose text mentions `identifier`, via GitHub's
+    code search. Returns (paths, degraded).
+
+    Only indexes the default branch and is rate-limited (~10 requests/minute
+    authenticated) — on a rate limit or a rejected query, this degrades to "no
+    candidates found" rather than raising, since caller/subclass context is a
+    nice-to-have, not something a review should fail over.
+
+    `degraded` is True when the empty list means "the search failed" rather
+    than "there are genuinely no matches". Callers must not report an empty
+    degraded result as a confirmed absence — that's indistinguishable from
+    "no callers exist" to a reader, which is exactly the wrong thing to tell
+    a reviewer.
+
+    Scoped to `extension:py` since parsing is Python-only right now — without
+    it, a common identifier gets crowded out by docs/README hits before any
+    real code result shows up within the small per-symbol result cap
+    (`pr_context.MAX_SEARCH_CANDIDATES`). Generalize this qualifier if that
+    ever changes.
+    """
+    url = f"{GITHUB_API}/search/code"
+    params = {"q": f"{identifier} repo:{owner}/{repo} extension:py"}
+
+    response = httpx.get(url, headers=github_headers(), params=params, timeout=30)
+    if response.status_code in (403, 422):
+        return [], True
+    response.raise_for_status()
+    return [item["path"] for item in response.json().get("items", [])], False
 
 
 def post_pr_comment(owner: str, repo: str, pr_number: int, body: str) -> dict:

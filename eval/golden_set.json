@@ -1,0 +1,141 @@
+{
+  "cases": [
+    {
+      "id": "click-should_strip_ansi-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "should_strip_ansi",
+      "symbol_kind": "function",
+      "symbol_start_line": 502,
+      "symbol_end_line": 513,
+      "symbol_file": "src/click/_compat.py",
+      "description": "Hand-verified with `grep -rn should_strip_ansi src tests` against pallets/click at the pinned sha. There are two definitions of this name in the repo (src/click/_compat.py:502 is the real one; src/click/testing.py:506 is an unrelated locally-scoped monkeypatch replacement that is never itself called by name anywhere) — deliberately included to exercise the tool's known name-collision limitation. Only real call expressions count; the attribute-assignment lines in testing.py (`utils.should_strip_ansi = ...`) are not calls.",
+      "expected_confirmed_callers": [
+        { "file": "src/click/termui.py", "line": 99 },
+        { "file": "src/click/utils.py", "line": 342 },
+        { "file": "tests/test_compat.py", "line": 121 }
+      ],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-get_best_encoding-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "get_best_encoding",
+      "symbol_kind": "function",
+      "symbol_start_line": 51,
+      "symbol_end_line": 56,
+      "symbol_file": "src/click/_compat.py",
+      "description": "Hand-verified with `grep -rn \"get_best_encoding(\" --include=*.py src tests`. Both real external call sites are in one file (_termui_impl.py), which imports it directly (`from ._compat import get_best_encoding`) — the simplest possible confirmed case: one file, one import, one caller call site used twice.",
+      "expected_confirmed_callers": [
+        { "file": "src/click/_termui_impl.py", "line": 649 },
+        { "file": "src/click/_termui_impl.py", "line": 966 }
+      ],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-make_default_short_help-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "_make_default_short_help",
+      "symbol_kind": "function",
+      "symbol_start_line": 62,
+      "symbol_end_line": 76,
+      "symbol_file": "src/click/utils.py",
+      "description": "Hand-verified with `grep -rn \"_make_default_short_help(\" --include=*.py .`. core.py calls it directly and imports it (`from .utils import _make_default_short_help`) -> confirmed. tests/test_utils/test_make_default_short_help.py calls it as `click.utils._make_default_short_help(...)` but only has `import click` (which resolves to src/click/__init__.py, not utils.py) -> the exact 'name matches, import graph doesn't confirm it' case the possible/confirmed split exists for. tests/test_deprecations.py references the name too but only as a bare attribute value in a tuple, never actually calls it, so it correctly produces no match at all.",
+      "expected_confirmed_callers": [
+        { "file": "src/click/core.py", "line": 1249 }
+      ],
+      "expected_possible_callers": [
+        { "file": "tests/test_utils/test_make_default_short_help.py", "line": 38 }
+      ]
+    },
+    {
+      "id": "click-split_opt-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "_split_opt",
+      "symbol_kind": "function",
+      "symbol_start_line": 111,
+      "symbol_end_line": 117,
+      "symbol_file": "src/click/parser.py",
+      "description": "Hand-verified with `grep -n \"_split_opt(\" src/click/core.py src/click/formatting.py`. Higher call-site volume than the other cases (5 real calls across 2 files) to check the tool doesn't drop or dedupe legitimate repeat calls within the same file. Both core.py and formatting.py import `_split_opt` directly from `.parser`.",
+      "expected_confirmed_callers": [
+        { "file": "src/click/core.py", "line": 2087 },
+        { "file": "src/click/core.py", "line": 3254 },
+        { "file": "src/click/core.py", "line": 3267 },
+        { "file": "src/click/core.py", "line": 3439 },
+        { "file": "src/click/formatting.py", "line": 312 }
+      ],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-resolve_color_default-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "resolve_color_default",
+      "symbol_kind": "function",
+      "symbol_start_line": 54,
+      "symbol_end_line": 66,
+      "symbol_file": "src/click/globals.py",
+      "description": "Hand-verified with `grep -rn \"resolve_color_default(\" --include=*.py src`. Spread across 3 different importing files, one of which (termui.py) calls it twice, to check aggregation across multiple confirmed files rather than just one.",
+      "expected_confirmed_callers": [
+        { "file": "src/click/exceptions.py", "line": 48 },
+        { "file": "src/click/termui.py", "line": 99 },
+        { "file": "src/click/termui.py", "line": 362 },
+        { "file": "src/click/termui.py", "line": 581 },
+        { "file": "src/click/utils.py", "line": 342 }
+      ],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-unpack_args-no-callers",
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "_unpack_args",
+      "symbol_kind": "function",
+      "symbol_start_line": 51,
+      "symbol_end_line": 65,
+      "symbol_file": "src/click/parser.py",
+      "description": "True-negative case: hand-verified with `grep -rn \"_unpack_args(\" --include=*.py .` that its only call site is inside parser.py itself (same-file, so excluded by design — same-file usage is covered by the same-file-context section, not the callers section). Confirms the tool reports nothing rather than hallucinating callers when there genuinely are none elsewhere in the repo.",
+      "expected_confirmed_callers": [],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-Option-subclasses-beyond-search-cap",
+      "type": "callers",
+      "known_limitation": true,
+      "owner": "pallets",
+      "repo": "click",
+      "sha": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
+      "symbol_name": "Option",
+      "symbol_kind": "class",
+      "symbol_start_line": 2858,
+      "symbol_end_line": 3660,
+      "symbol_file": "src/click/core.py",
+      "description": "Deliberately exercises the MAX_SEARCH_CANDIDATES boundary — the same shape of gap the extension:py fix addressed, just too large to fix the same way. `Option` has exactly 3 real subclasses in the repo, hand-verified with `grep -rn \"(Option)\" --include=*.py .` (tests/test_context.py:199,404,445; confirmed no other file subclasses it). But `Option` is a common name: `search_code('Option')` scoped to extension:py returns 30+ results and tests/test_context.py isn't even on the first page — so with the current 8-candidate cap this is a guaranteed miss, verified live on 2026-08-25. expected_confirmed is the TRUE ground truth, not what the tool can currently reach, so this case's recall honestly reports 0.00 rather than being papered over as a pass. See eval_context_retrieval.py for how known_limitation cases are scored separately from the main tally — this should read as 'accepted, tracked gap,' not a regression, and a future fix (bigger cap, smarter query, ranking by import graph) should show up here as the score moving off 0.00.",
+      "expected_confirmed_callers": [
+        { "file": "tests/test_context.py", "line": 199 },
+        { "file": "tests/test_context.py", "line": 404 },
+        { "file": "tests/test_context.py", "line": 445 }
+      ],
+      "expected_possible_callers": []
+    },
+    {
+      "id": "click-pr1572-symbol-cap-truncation",
+      "type": "symbol_cap_truncation",
+      "owner": "pallets",
+      "repo": "click",
+      "pr_number": 1572,
+      "min_expected_changed_symbols": 6,
+      "description": "PR #1572 ('Add file-like pager: click.get_pager_file()') touches 11 functions/classes across several files — comfortably past MAX_CHANGED_SYMBOLS (5), confirmed live on 2026-08-25 via build_context(). Checks the truncation-visibility fix end to end: hitting the cap must leave a trace in the assembled context text (not just a log line), since that's what the reviewing LLM actually sees. Diff content for a closed PR is stable, so this shouldn't drift the way the caller-search cases can.",
+      "expected_truncation_note": true
+    }
+  ]
+}
