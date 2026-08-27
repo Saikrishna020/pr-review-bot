@@ -99,6 +99,69 @@ def test_resolve_absolute_import_never_emits_backslashes():
     assert all("\\" not in c for c in candidates)
 
 
+def test_from_package_import_module_offers_the_submodule_path():
+    # SCRUM-8: `from package import module` used to resolve only to
+    # package.py / package/__init__.py, so a file importing a submodule this
+    # way was demoted from a confirmed caller to a name-only "possible" match.
+    imp = parse_python_source("from package import module\n").imports[0]
+    candidates = resolve_python_import_paths(imp, "caller.py")
+    assert "package/module.py" in candidates
+    assert "src/package/module.py" in candidates
+
+
+def test_submodule_candidates_come_after_module_candidates():
+    # Order is load-bearing: _resolve_import takes the first candidate that
+    # exists, so module-level paths must stay ahead of submodule guesses or
+    # ordinary attribute imports would start resolving to non-existent files
+    # (and cost an extra API call each).
+    imp = parse_python_source("from package import module\n").imports[0]
+    candidates = resolve_python_import_paths(imp, "caller.py")
+    assert candidates.index("package.py") < candidates.index("package/module.py")
+    assert candidates.index("package/__init__.py") < candidates.index("package/module.py")
+
+
+def test_confirmed_caller_detection_matches_a_submodule_import():
+    # Mirrors what _confirm_usage does: a file is a confirmed caller of
+    # symbol_file if any resolved candidate equals it.
+    parsed = parse_python_source("from package import module\n\nmodule.func()\n")
+    symbol_file = "package/module.py"
+    resolved = [
+        candidate
+        for imp in parsed.imports
+        for candidate in resolve_python_import_paths(imp, "caller.py")
+    ]
+    assert symbol_file in resolved
+
+
+def test_aliased_submodule_import_resolves_to_the_original_name():
+    imp = parse_python_source("from package import module as m\n").imports[0]
+    assert imp.names == ["module"]
+    assert "package/module.py" in resolve_python_import_paths(imp, "caller.py")
+
+
+def test_star_import_contributes_no_submodule_names():
+    imp = parse_python_source("from package import *\n").imports[0]
+    assert imp.names == []
+    assert resolve_python_import_paths(imp, "caller.py") == [
+        "package.py", "package/__init__.py", "src/package.py", "src/package/__init__.py",
+    ]
+
+
+def test_plain_dotted_import_is_unchanged():
+    imp = parse_python_source("import package.module\n").imports[0]
+    assert imp.names == []
+    assert resolve_python_import_paths(imp, "caller.py") == [
+        "package/module.py", "package/module/__init__.py",
+        "src/package/module.py", "src/package/module/__init__.py",
+    ]
+
+
+def test_relative_submodule_import_resolves_within_the_package():
+    imp = parse_python_source("from .mod import helper\n").imports[0]
+    candidates = resolve_python_import_paths(imp, "pkg/caller.py")
+    assert candidates.index("pkg/mod.py") < candidates.index("pkg/mod/helper.py")
+
+
 def test_resolve_relative_import_walks_up_by_level():
     # `from . import x` inside package/sub/module.py -> package/sub/x.py
     candidates = resolve_python_import_paths(Import(raw="x", level=1), "package/sub/module.py")

@@ -34,6 +34,10 @@ class CallSite:
 class Import:
     raw: str    # dotted module path, or a bare submodule name for `from . import x`
     level: int  # 0 = absolute import, 1+ = number of leading dots
+    # Names bound by a `from X import a, b` statement. Syntax alone can't say
+    # whether these are attributes of X or submodules of it, so resolution
+    # tries them as submodules too — see resolve_python_import_paths.
+    names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -124,6 +128,24 @@ def _extract_calls(query, root, source: bytes) -> list[CallSite]:
     return calls
 
 
+def _imported_names(from_import_node, source: bytes) -> list[str]:
+    """The names bound by a `from X import a, b as c` statement.
+
+    Aliases resolve to the original name, since that's what identifies the
+    file on disk. `import *` binds no nameable submodule, so it contributes
+    nothing.
+    """
+    names: list[str] = []
+    for name_node in from_import_node.children_by_field_name("name"):
+        if name_node.type == "dotted_name":
+            names.append(_text(name_node, source))
+        elif name_node.type == "aliased_import":
+            original = name_node.child_by_field_name("name")
+            if original is not None:
+                names.append(_text(original, source))
+    return names
+
+
 def _extract_imports(root, source: bytes) -> list[Import]:
     imports: list[Import] = []
     stack = [root]
@@ -140,14 +162,15 @@ def _extract_imports(root, source: bytes) -> list[Import]:
         elif node.type == "import_from_statement":
             module_node = node.child_by_field_name("module_name")
             if module_node is not None:
+                imported_names = _imported_names(node, source)
                 if module_node.type == "dotted_name":
-                    imports.append(Import(raw=_text(module_node, source), level=0))
+                    imports.append(Import(raw=_text(module_node, source), level=0, names=imported_names))
                 elif module_node.type == "relative_import":
                     raw = _text(module_node, source)
                     level = len(raw) - len(raw.lstrip("."))
                     rest = raw[level:]
                     if rest:
-                        imports.append(Import(raw=rest, level=level))
+                        imports.append(Import(raw=rest, level=level, names=imported_names))
                     else:
                         # `from . import x` — x is a submodule of the resolved package.
                         for name_node in node.children_by_field_name("name"):
@@ -179,15 +202,35 @@ def resolve_python_import_paths(imp: Import, importing_file: str) -> list[str]:
         base_dir = Path(importing_file).parent
         for _ in range(imp.level - 1):
             base_dir = base_dir.parent
-        return [
+        candidates = [
             (base_dir / rel).with_suffix(".py").as_posix(),
             (base_dir / rel / "__init__.py").as_posix(),
         ]
+        package_dirs = [base_dir / rel]
+    else:
+        # Absolute import — try both a flat layout and a common src/-layout.
+        candidates = [
+            rel.with_suffix(".py").as_posix(),
+            (rel / "__init__.py").as_posix(),
+            f"src/{rel.with_suffix('.py').as_posix()}",
+            f"src/{(rel / '__init__.py').as_posix()}",
+        ]
+        package_dirs = [rel, Path("src") / rel]
 
-    # Absolute import — try both a flat layout and a common src/-layout.
-    return [
-        rel.with_suffix(".py").as_posix(),
-        (rel / "__init__.py").as_posix(),
-        f"src/{rel.with_suffix('.py').as_posix()}",
-        f"src/{(rel / '__init__.py').as_posix()}",
-    ]
+    # `from package import module` binds a name that syntax alone can't
+    # classify: `module` may be an attribute defined inside package/__init__.py,
+    # or a separate package/module.py file. Offer the submodule paths too, so a
+    # file importing a submodule this way is recognised as a real caller of it
+    # rather than being demoted to an unconfirmed name match.
+    #
+    # These go last deliberately. Callers that take the first candidate that
+    # exists (_resolve_import) keep their current behaviour and never fetch
+    # these unless every module-level candidate missed, so this adds no API
+    # calls in the common case. Callers that check membership across all
+    # candidates (_confirm_usage) get the extra precision for free.
+    candidates.extend(
+        (package_dir / name).with_suffix(".py").as_posix()
+        for package_dir in package_dirs
+        for name in imp.names
+    )
+    return candidates
