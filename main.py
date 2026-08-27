@@ -126,6 +126,27 @@ def debug_github_auth() -> dict:
     }
 
 
+@app.get("/debug/rate-limit")
+def debug_rate_limit() -> dict:
+    """Both quota blocks that actually matter day to day, not just `core`.
+
+    `/debug/github-auth` only ever surfaced `core`, which is a poor proxy for
+    whether a review is about to degrade — Phase 2's context building can fire
+    dozens of code-search calls per review, and `search` has a far tighter
+    budget (~10/min authenticated) than `core` (~5000/hr). This exists so that
+    can be checked before a review silently loses caller context, not
+    diagnosed after the fact from a "possible" list that's suspiciously empty.
+    """
+    response = httpx.get("https://api.github.com/rate_limit", headers=github_headers(), timeout=15)
+    response.raise_for_status()
+    resources = response.json().get("resources", {})
+    return {
+        "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
+        "core": resources.get("core", {}),
+        "search": resources.get("search", {}),
+    }
+
+
 @app.post("/review")
 def review(request: ReviewRequest) -> dict:
     """Manual trigger: review one PR on demand and return the JSON result.
