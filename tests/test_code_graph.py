@@ -133,6 +133,16 @@ def test_confirmed_caller_detection_matches_a_submodule_import():
     assert symbol_file in resolved
 
 
+def test_subpackage_import_offers_the_package_init_path():
+    # An imported name may be a directory, not a single file. The rest of
+    # resolve_python_import_paths always tries both X.py and X/__init__.py,
+    # so the submodule candidates have to as well.
+    imp = parse_python_source("from package import subpkg\n").imports[0]
+    candidates = resolve_python_import_paths(imp, "caller.py")
+    assert "package/subpkg.py" in candidates
+    assert "package/subpkg/__init__.py" in candidates
+
+
 def test_aliased_submodule_import_resolves_to_the_original_name():
     imp = parse_python_source("from package import module as m\n").imports[0]
     assert imp.names == ["module"]

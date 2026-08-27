@@ -228,9 +228,16 @@ def resolve_python_import_paths(imp: Import, importing_file: str) -> list[str]:
     # these unless every module-level candidate missed, so this adds no API
     # calls in the common case. Callers that check membership across all
     # candidates (_confirm_usage) get the extra precision for free.
+    # Both forms, since the imported name may be a single-file module
+    # (name.py) or a subpackage directory (name/__init__.py) — matching how
+    # the module-level candidates above already try each.
     candidates.extend(
-        (package_dir / name).with_suffix(".py").as_posix()
+        path
         for package_dir in package_dirs
         for name in imp.names
+        for path in (
+            (package_dir / name).with_suffix(".py").as_posix(),
+            (package_dir / name / "__init__.py").as_posix(),
+        )
     )
     return candidates
