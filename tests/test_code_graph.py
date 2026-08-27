@@ -172,6 +172,25 @@ def test_relative_submodule_import_resolves_within_the_package():
     assert candidates.index("pkg/mod.py") < candidates.index("pkg/mod/helper.py")
 
 
+def test_ordinary_attribute_import_can_collide_with_an_unrelated_file_of_the_same_name():
+    # Documents a known, accepted trade-off (found in PR review, SCRUM-8):
+    # `from utils import helper` binds an ordinary attribute here, but syntax
+    # alone can't distinguish that from a submodule import. If the repo also
+    # happens to contain an unrelated utils/helper.py, it appears in the
+    # candidate list too — a caller-confirmation check that tests membership
+    # across ALL candidates (pr_context._confirm_usage) would then wrongly
+    # treat that unrelated file as a confirmed importer. Fixing this properly
+    # means fetching and parsing utils/__init__.py to check whether it
+    # actually defines `helper`, which costs a network call on every
+    # confirmation check — accepted as a trade-off rather than paid for, the
+    # same call made for MAX_SEARCH_CANDIDATES. If this starts failing, the
+    # trade-off has been fixed and this test's assumption should be replaced
+    # with a real assertion that the collision no longer occurs.
+    imp = parse_python_source("from utils import helper\n").imports[0]
+    candidates = resolve_python_import_paths(imp, "caller.py")
+    assert "utils/helper.py" in candidates  # the coincidental, unintended match
+
+
 def test_resolve_relative_import_walks_up_by_level():
     # `from . import x` inside package/sub/module.py -> package/sub/x.py
     candidates = resolve_python_import_paths(Import(raw="x", level=1), "package/sub/module.py")

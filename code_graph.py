@@ -228,9 +228,24 @@ def resolve_python_import_paths(imp: Import, importing_file: str) -> list[str]:
     # these unless every module-level candidate missed, so this adds no API
     # calls in the common case. Callers that check membership across all
     # candidates (_confirm_usage) get the extra precision for free.
+    #
     # Both forms, since the imported name may be a single-file module
     # (name.py) or a subpackage directory (name/__init__.py) — matching how
     # the module-level candidates above already try each.
+    #
+    # Known accepted trade-off (found in PR review, SCRUM-8): this is added
+    # for every imported name, including ordinary attributes, since syntax
+    # alone can't tell the two apart. If `from package import thing` imports
+    # an ordinary attribute AND an unrelated file also happens to exist at
+    # package/thing.py, a membership check over all candidates
+    # (_confirm_usage) will incorrectly treat that unrelated file as a
+    # confirmed importer. A correct fix means fetching and parsing
+    # package/__init__.py to check whether it actually defines `thing` before
+    # trusting the submodule guess — an extra network fetch on every
+    # confirmation check, which works against the concurrency work that made
+    # a full context build practical. Accepted rather than paid for, same as
+    # MAX_SEARCH_CANDIDATES; see test_ordinary_attribute_import_can_collide_
+    # with_an_unrelated_file_of_the_same_name.
     candidates.extend(
         path
         for package_dir in package_dirs
