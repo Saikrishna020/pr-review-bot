@@ -15,7 +15,10 @@ from jira_ticket import JiraTicket, resolve_ticket_for_pr
 from pr_context import RepoContext, safe_build_context
 from review_real_pr import maybe_post_review, review_pr
 
+# See fetch_real_pr_diff.py for why both paths are loaded (Render's Secret
+# Files feature mounts at /etc/secrets/, not the working directory).
 load_dotenv()
+load_dotenv("/etc/secrets/.env", override=False)
 
 log = logging.getLogger("uvicorn.error")
 

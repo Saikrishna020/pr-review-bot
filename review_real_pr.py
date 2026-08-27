@@ -16,7 +16,10 @@ from pr_context import RepoContext, safe_build_context
 from review_prompt import build_system_prompt, build_user_prompt
 from review_result import ReviewResult, parse_review_result
 
+# See fetch_real_pr_diff.py for why both paths are loaded (Render's Secret
+# Files feature mounts at /etc/secrets/, not the working directory).
 load_dotenv()
+load_dotenv("/etc/secrets/.env", override=False)
 
 # Where the bot should actually post comments. Defaults to the demo source
 # (pallets/click) ONLY for reading diffs; posting there is blocked below no

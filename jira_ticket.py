@@ -20,7 +20,10 @@ from dataclasses import dataclass
 import httpx
 from dotenv import load_dotenv
 
+# See fetch_real_pr_diff.py for why both paths are loaded (Render's Secret
+# Files feature mounts at /etc/secrets/, not the working directory).
 load_dotenv()
+load_dotenv("/etc/secrets/.env", override=False)
 
 log = logging.getLogger("uvicorn.error")
 

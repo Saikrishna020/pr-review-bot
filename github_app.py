@@ -32,7 +32,12 @@ import httpx
 import jwt
 from dotenv import load_dotenv
 
+# See fetch_real_pr_diff.py for why both paths are loaded — Render's Secret
+# Files feature mounts at /etc/secrets/, which load_dotenv() doesn't check by
+# default, and it's the natural place to put GITHUB_APP_PRIVATE_KEY (a
+# multi-line PEM) since it needs no escaping there.
 load_dotenv()
+load_dotenv("/etc/secrets/.env", override=False)
 
 log = logging.getLogger("uvicorn.error")
 

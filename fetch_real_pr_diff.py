@@ -6,7 +6,14 @@ from dotenv import load_dotenv
 
 from github_app import get_installation_token
 
+# Local dev reads .env from the working directory (the default). Render's
+# "Secret Files" feature — the better way to paste a multi-line PEM key,
+# since it needs no escaping — mounts uploaded files at /etc/secrets/<name>
+# instead, which load_dotenv() never looks at on its own. override=False (the
+# default) means an explicit Environment Variable set in the host's dashboard
+# still wins over either file, so precedence stays predictable.
 load_dotenv()
+load_dotenv("/etc/secrets/.env", override=False)
 
 GITHUB_API = "https://api.github.com"
 
