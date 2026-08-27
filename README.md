@@ -123,6 +123,7 @@ Deploys as a standard ASGI app, e.g. on Render:
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Set all `.env` values as environment variables in the host's dashboard (`.env` itself is not committed)
+- Set all `.env` values as environment variables in the host's dashboard (`.env` itself is not committed) — for `GITHUB_APP_PRIVATE_KEY`, paste the `.pem`'s actual multi-line contents directly (most hosts' env editors handle real newlines fine); `GITHUB_APP_PRIVATE_KEY_PATH` only makes sense for a local checkout
+- **Python version matters**: `.python-version` pins this repo to 3.11, and it's load-bearing, not cosmetic — `tree_sitter_languages` only ships prebuilt wheels up to roughly 3.12, with no source distribution to fall back to, so a host that defaults to a newer Python (e.g. Render currently defaults to 3.14) fails the build with `No matching distribution found for tree_sitter_languages`. Most hosts read `.python-version` automatically; if yours doesn't, set `PYTHON_VERSION=3.11.9` (or whatever `.python-version` says) directly.
 
 After deploying, register a webhook on the target repo pointed at `https://<your-host>/webhook`, subscribed to `pull_request` events, using the same value as `GITHUB_WEBHOOK_SECRET`.
