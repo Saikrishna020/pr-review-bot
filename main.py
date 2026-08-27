@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from fetch_real_pr_diff import get_github_token, get_pr_diff, get_pr_head, github_headers
+from fetch_real_pr_diff import get_github_token, get_pr_diff, get_pr_head, github_headers, resolve_auth_token
 from jira_ticket import JiraTicket, resolve_ticket_for_pr
 from pr_context import RepoContext, safe_build_context
 from review_real_pr import maybe_post_review, review_pr
@@ -57,11 +57,16 @@ async def lifespan(app: FastAPI):
     An unauthenticated GitHub client still "works" until it hits the 60/hour shared-IP
     limit, so a missing token has to be stated explicitly to be noticed.
     """
+    _token, identity = resolve_auth_token()
     log.info(
-        "PR Review Bot starting | commit=%s github_token=%s deepseek_key=%s "
+        "PR Review Bot starting | commit=%s github_auth=%s deepseek_key=%s "
         "target=%s/%s post_comments=%s webhook_secret=%s",
         os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
-        "found" if get_github_token() else "MISSING (GitHub calls will be rate-limited)",
+        {
+            "github-app": "GitHub App (comments authored by the app)",
+            "personal-access-token": "PAT (comments authored by the token's owner)",
+            "unauthenticated": "MISSING (GitHub calls will be rate-limited)",
+        }[identity],
         "found" if os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("Deepseek_api") else "MISSING",
         os.environ.get("TARGET_OWNER", "unset"),
         os.environ.get("TARGET_REPO", "unset"),

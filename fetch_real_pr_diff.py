@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import httpx
 from dotenv import load_dotenv
 
+from github_app import get_installation_token
+
 load_dotenv()
 
 GITHUB_API = "https://api.github.com"
@@ -27,13 +29,39 @@ def get_github_token() -> str | None:
     return None
 
 
-def github_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
+def resolve_auth_token(prefer_app: bool = True) -> tuple[str | None, str]:
+    """The token to authenticate with, and which identity it represents.
+
+    By default, prefers a GitHub App installation token when the App is
+    configured, so comments are authored by `app-slug[bot]` rather than by
+    whoever owns the personal access token. Falls back to the PAT, then to
+    unauthenticated (which still works for public repos, at 60 requests/hour).
+
+    Pass `prefer_app=False` to force the PAT even when the App is available —
+    for anything meant to represent a human rather than the reviewer itself
+    (see `post_pr_comment`'s `as_bot` parameter). Using the App identity there
+    would make a human's reply indistinguishable from the bot talking to
+    itself, which defeats the entire point of a distinct bot identity.
+    """
+    if prefer_app:
+        installation_token = get_installation_token()
+        if installation_token:
+            return installation_token, "github-app"
+
+    pat = get_github_token()
+    if pat:
+        return pat, "personal-access-token"
+
+    return None, "unauthenticated"
+
+
+def github_headers(accept: str = "application/vnd.github+json", prefer_app: bool = True) -> dict[str, str]:
     headers = {
         "Accept": accept,
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    token = get_github_token()
+    token, _identity = resolve_auth_token(prefer_app=prefer_app)
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -146,19 +174,30 @@ def search_code(owner: str, repo: str, identifier: str) -> tuple[list[str], bool
     return [item["path"] for item in response.json().get("items", [])], False
 
 
-def post_pr_comment(owner: str, repo: str, pr_number: int, body: str) -> dict:
+def post_pr_comment(owner: str, repo: str, pr_number: int, body: str, as_bot: bool = True) -> dict:
     """Post a single issue-style comment on a PR (PRs are issues in the GitHub API).
 
-    Requires GITHUB_TOKEN to be set with `repo` (or fine-grained `pull_requests: write`) scope.
+    `as_bot=True` (the default) is for the review itself — it uses the GitHub
+    App identity when one is configured, so the comment is authored by
+    `<app-slug>[bot]` rather than a person. Pass `as_bot=False` for anything
+    meant to represent a human replying to that review (e.g. a "developer
+    response" comment); this forces the personal access token even when the
+    App is available, so a human reply is never mistaken for the bot
+    commenting on its own review.
     """
-    if not get_github_token():
-        raise RuntimeError("Set GITHUB_TOKEN in .env before posting comments.")
+    token, _identity = resolve_auth_token(prefer_app=as_bot)
+    if token is None:
+        raise RuntimeError(
+            "No usable GitHub credentials — set GITHUB_TOKEN"
+            + (", or configure the GitHub App," if as_bot else "")
+            + " before posting comments."
+        )
 
     url = f"{GITHUB_API}/repos/{owner}/{repo}/issues/{pr_number}/comments"
 
     response = httpx.post(
         url,
-        headers=github_headers(),
+        headers=github_headers(prefer_app=as_bot),
         json={"body": body},
         timeout=30,
     )
