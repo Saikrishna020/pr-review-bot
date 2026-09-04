@@ -22,7 +22,7 @@ load_dotenv("/etc/secrets/.env", override=False)
 
 log = logging.getLogger("uvicorn.error")
 
-WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
+WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET") or "PLACEHOLDER_NOT_A_REAL_SECRET_CHANGE_ME"
 
 # GitHub events that mean "there's new/changed code to review" for a PR.
 REVIEWABLE_ACTIONS = {"opened", "synchronize", "reopened"}
@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI):
         os.environ.get("POST_COMMENTS", "false"),
         "set" if WEBHOOK_SECRET else "unset (signature checks skipped)",
     )
+    if not os.environ.get("GITHUB_WEBHOOK_SECRET"):
+        log.warning(
+            "GITHUB_WEBHOOK_SECRET is not set — incoming /webhook requests are not "
+            "signature-verified. Set it before pointing a real GitHub webhook here."
+        )
     yield
 
 
