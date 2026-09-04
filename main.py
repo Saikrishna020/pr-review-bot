@@ -143,10 +143,14 @@ def debug_rate_limit() -> dict:
     response = httpx.get("https://api.github.com/rate_limit", headers=github_headers(), timeout=15)
     response.raise_for_status()
     resources = response.json().get("resources", {})
+    core = resources.get("core", {})
+    search = resources.get("search", {})
+    core_remaining_pct = round(core["remaining"] / core["limit"] * 100, 1) if core.get("limit") else None
     return {
         "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
-        "core": resources.get("core", {}),
-        "search": resources.get("search", {}),
+        "core": core,
+        "search": search,
+        "core_remaining_pct": core_remaining_pct,
     }
 
 
