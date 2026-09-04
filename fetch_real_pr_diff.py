@@ -234,9 +234,9 @@ def main() -> None:
 
     print(f"Diff length: {len(diff)} characters")
     print()
-    print(diff[:3000])
+    print(diff[:5000])
 
-    if len(diff) > 3000:
+    if len(diff) > 5000:
         print()
         print("[diff preview truncated]")
 
