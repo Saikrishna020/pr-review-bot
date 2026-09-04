@@ -183,11 +183,20 @@ def flatten_adf(adf_doc: object) -> str:
     return text.strip()
 
 
+# In-memory cache of prior lookups, so a webhook retry for the same PR
+# doesn't re-hit Jira for a ticket key it already resolved this process.
+_ticket_cache: dict[str, JiraTicket | None] = {}
+
+
 def fetch_jira_ticket(ticket_id: str) -> JiraTicket | None:
     """Fetches one ticket. Returns None if Jira isn't configured, the ticket
     doesn't exist, or the request fails — all of which mean "review the code
     without ticket context", never "fail the review".
     """
+    cache_key = ticket_id.rstrip("0123456789")
+    if cache_key in _ticket_cache:
+        return _ticket_cache[cache_key]
+
     config = get_jira_config()
     if config is None:
         log.info("Jira not configured (need domain, email, token) — skipping ticket lookup for %s", ticket_id)
@@ -207,6 +216,7 @@ def fetch_jira_ticket(ticket_id: str) -> JiraTicket | None:
         )
         if response.status_code == 404:
             log.info("Jira ticket %s not found (404) — reviewing without ticket context", ticket_id)
+            _ticket_cache[cache_key] = None
             return None
         response.raise_for_status()
         data = response.json()
@@ -218,7 +228,7 @@ def fetch_jira_ticket(ticket_id: str) -> JiraTicket | None:
         return None
 
     fields = data.get("fields") or {}
-    return JiraTicket(
+    ticket = JiraTicket(
         key=data.get("key", ticket_id),
         summary=(fields.get("summary") or "").strip(),
         description=flatten_adf(fields.get("description")),
@@ -226,6 +236,8 @@ def fetch_jira_ticket(ticket_id: str) -> JiraTicket | None:
         issue_type=((fields.get("issuetype") or {}).get("name")),
         url=f"{base}/browse/{data.get('key', ticket_id)}",
     )
+    _ticket_cache[cache_key] = ticket
+    return ticket
 
 
 def resolve_ticket_for_pr(branch_name: str | None, pr_title: str | None) -> JiraTicket | None:
