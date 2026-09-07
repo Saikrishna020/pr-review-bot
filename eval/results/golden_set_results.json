@@ -1,0 +1,122 @@
+{
+  "run_at": "2026-09-04T05:31:17.311487+00:00",
+  "jira_alignment": {
+    "cases": [
+      {
+        "id": "scrum1-fully-implemented",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "scrum2-unrelated-diff",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "scrum3-two-of-three",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "scrum4-buried-edge-case",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": true
+      },
+      {
+        "id": "scrum5-vague-ticket",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "scrum6-wrong-ticket-linked",
+        "skipped": false,
+        "verdict_ok": true,
+        "checks_ok": true,
+        "false_satisfies": false,
+        "false_negative": false,
+        "is_stress_test": false
+      }
+    ],
+    "passed": 6,
+    "total": 6,
+    "false_satisfies": []
+  },
+  "issue_detection": {
+    "cases": [
+      {
+        "id": "clean-rename",
+        "passed": false,
+        "false_positive": true,
+        "missed": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "off-by-one",
+        "passed": true,
+        "false_positive": false,
+        "missed": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "null-crash",
+        "passed": true,
+        "false_positive": false,
+        "missed": false,
+        "is_stress_test": false
+      },
+      {
+        "id": "style-nit",
+        "passed": false,
+        "false_positive": false,
+        "missed": true,
+        "is_stress_test": false
+      },
+      {
+        "id": "correct-refactor",
+        "passed": true,
+        "false_positive": false,
+        "missed": false,
+        "is_stress_test": true
+      },
+      {
+        "id": "hardcoded-secret",
+        "passed": true,
+        "false_positive": false,
+        "missed": false,
+        "is_stress_test": false
+      }
+    ],
+    "passed": 4,
+    "total": 6,
+    "false_positives": [
+      "clean-rename"
+    ],
+    "missed": [
+      "style-nit"
+    ]
+  },
+  "overall": {
+    "passed": 10,
+    "total": 12
+  }
+}

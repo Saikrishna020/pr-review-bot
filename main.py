@@ -167,7 +167,14 @@ def review(request: ReviewRequest) -> dict:
     context, ticket = _gather_review_inputs(
         request.owner, request.repo, diff, head.sha, head.ref, head.title
     )
-    result = review_pr(diff, context=context, ticket=ticket)
+    trace_metadata = {
+        "owner": request.owner,
+        "repo": request.repo,
+        "pr_number": request.pr_number,
+        "ticket_key": ticket.key if ticket else None,
+        "entry_point": "manual_review_endpoint",
+    }
+    result = review_pr(diff, context=context, ticket=ticket, trace_metadata=trace_metadata)
 
     if request.post:
         maybe_post_review(request.owner, request.repo, request.pr_number, result, ticket)
@@ -201,7 +208,14 @@ def _run_review_and_post(
         log.info("Reviewing %s (branch=%s)", target, branch_ref)
         diff = get_pr_diff(owner, repo, pr_number)
         context, ticket = _gather_review_inputs(owner, repo, diff, head_sha, branch_ref, pr_title)
-        result = review_pr(diff, context=context, ticket=ticket)
+        trace_metadata = {
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "ticket_key": ticket.key if ticket else None,
+            "entry_point": "webhook",
+        }
+        result = review_pr(diff, context=context, ticket=ticket, trace_metadata=trace_metadata)
         log.info(
             "Review of %s found %d issue(s), jira_verdict=%s (ticket=%s, context_truncated=%s)",
             target, len(result.issues), result.jira_verdict,

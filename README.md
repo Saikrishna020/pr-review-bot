@@ -63,6 +63,37 @@ That run also turned up two real bugs in this codebase, both since fixed:
 - **A data race.** `code_graph` held one module-level tree-sitter `Parser` shared across `pr_context`'s 16-worker pool. tree-sitter parsers aren't safe to call `.parse()` on concurrently. Parsers are now thread-local, with a regression test that runs 64 concurrent parses.
 - **Silent degradation.** A rate-limited code search or a failed file fetch produced context that was quietly incomplete but presented as complete — so an empty callers list read as "nothing calls this" rather than "we couldn't look". `search_code` now returns a `degraded` flag, failed file fetches are tracked, and both feed `RepoContext.truncated` and add an explicit note to the context text.
 
+### Issue detection
+
+The other half of the same review call: does the diff have real bugs, independent of any linked ticket. `eval/eval_issue_detection.py` grades findings against `eval/issue_golden_set.py` — 6 hand-authored cases (context=None, ticket=None, to isolate this judgement from the other two pipelines) — split the same way as the Jira eval: a missed real bug and a false alarm on clean/correct code are not equally bad, so both are reported on their own line rather than blended into one accuracy number.
+
+#### Current results (4/6)
+
+| Case | Diff | Expected | Got |
+|---|---|---|---|
+| Clean rename | `calc` → `calculate_subtotal`, no behavior change | no flag | ❌ flagged as "API-breaking" |
+| Off-by-one | Drops the last entry instead of index 0 | flag, blocking/warning | ✅ caught, blocking |
+| Null crash | `.lower()` on a documented-optional field | flag, blocking | ✅ caught, blocking |
+| Style-only nit | Whitespace-only cleanup | flag, note | ❌ not flagged at all |
+| **Correct-but-large refactor** | Duplicated blocks extracted into shared helpers, identical behavior | no flag | ✅ held — no false alarm |
+| Hardcoded secret | `get_secret(...)` replaced with a literal key | flag, blocking | ✅ caught, blocking |
+
+Reported as-is, including the two misses, rather than adjusted after the fact — same discipline as the Jira eval. The refactor case is the one that matters most (a bot that flags every large diff regardless of correctness is worse than useless); it held. The rename case is arguably a defensible catch (a public function rename *is* a real API compatibility question) rather than a clean miscalibration, and is left as a scored miss rather than quietly loosened.
+
+### Real-PR proof run
+
+Golden-set cases above run in isolation (`context=None`) by design. As a complement, 5 real PRs were opened against this repo, each linked to a real ticket in the Jira sandbox, each seeded with one realistic dev mistake decided *before* the diff was written — then reviewed through the actual `/webhook`-equivalent pipeline (real diff, real Phase 2 context, real Jira fetch, real posted GitHub comment).
+
+| Ticket | Seeded mistake | Bot caught it |
+|---|---|---|
+| [SCRUM-10](https://github.com/Saikrishna020/pr-review-bot/pull/4) | none (clean implementation) | ✅ `satisfies`, 0 issues |
+| [SCRUM-11](https://github.com/Saikrishna020/pr-review-bot/pull/5) | Cache key collides across different ticket keys | ✅ flagged blocking, verdict downgraded to `partial` |
+| [SCRUM-12](https://github.com/Saikrishna020/pr-review-bot/pull/6) | Implements 1 of 2 required fields | ✅ flagged blocking, `partial` |
+| [SCRUM-13](https://github.com/Saikrishna020/pr-review-bot/pull/7) | Hardcoded fallback secret alongside an otherwise-correct fix | ✅ flagged blocking, `partial` |
+| [SCRUM-14](https://github.com/Saikrishna020/pr-review-bot/pull/8) | Diff unrelated to the linked ticket (wrong branch) | ✅ `does_not_satisfy`, named all 3 gaps |
+
+All 5 seeded conditions were caught. Full reasoning, every issue's exact text, and per-case LangSmith trace pointers are in [`eval/results/TICKET_REPORT.md`](eval/results/TICKET_REPORT.md); raw structured results in [`eval/results/`](eval/results/).
+
 ## Project layout
 
 | File | Purpose |
@@ -96,6 +127,7 @@ Environment variables (see `.env.example`):
 - `TARGET_OWNER` / `TARGET_REPO` — the repo the bot reviews
 - `POST_COMMENTS` — must be `true` before the bot posts anything; defaults to a dry run
 - `GITHUB_WEBHOOK_SECRET` — shared secret used to verify incoming webhook requests
+- `LANGSMITH_API_KEY` / `LANGSMITH_TRACING` / `LANGSMITH_PROJECT` — optional; traces every DeepSeek review call (prompt, raw output, token usage) to LangSmith. Leave `LANGSMITH_API_KEY` blank to skip tracing entirely.
 
 ## Running locally
 

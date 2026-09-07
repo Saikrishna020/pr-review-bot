@@ -6,6 +6,10 @@ python-dotenv==1.2.2
 tree_sitter==0.21.3
 tree_sitter_languages==1.10.2
 
+# Optional tracing of DeepSeek review calls; wrap_openai() no-ops safely if
+# LANGSMITH_API_KEY isn't set.
+langsmith==0.8.5
+
 # GitHub App auth, so reviews are posted by the app rather than a person
 PyJWT[crypto]==2.13.0
 

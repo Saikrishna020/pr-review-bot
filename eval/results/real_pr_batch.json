@@ -1,0 +1,124 @@
+[
+  {
+    "pr_number": 4,
+    "pr_title": "SCRUM-10: Add GET /debug/config endpoint",
+    "branch": "SCRUM-10-debug-config",
+    "ticket_key": "SCRUM-10",
+    "ticket_summary": "Add GET /debug/config to report which optional integrations are active",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-10",
+    "seeded_mistake": "none \u2014 fully correct",
+    "expected_verdict": "satisfies",
+    "bot_verdict": "satisfies",
+    "verdict_ok": true,
+    "issues": [],
+    "missing_requirements": [],
+    "reasoning": "The diff adds GET /debug/config with the three required booleans (jira_configured, github_app_configured, langsmith_tracing_enabled) and target_owner/target_repo. It does not return secret values: get_jira_config() is only used as a None-check, GITHUB_APP_ID is only used via bool(), and LANGSMITH_TRACING/TARGET_* are not credentials. Existing debug endpoints are not modified; the change is additive and consistent with the /debug/rate-limit pattern.",
+    "context_truncated": false,
+    "comment_posted": true
+  },
+  {
+    "pr_number": 5,
+    "pr_title": "SCRUM-11: Cache Jira ticket lookups in-memory",
+    "branch": "SCRUM-11-jira-cache",
+    "ticket_key": "SCRUM-11",
+    "ticket_summary": "Cache fetch_jira_ticket results in-memory to avoid duplicate fetches on webhook retries",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-11",
+    "seeded_mistake": "cache key strips trailing digits (project prefix only), so different ticket keys in the same project collide and can return each other's cached result",
+    "expected_verdict": "satisfies",
+    "bot_verdict": "partial",
+    "verdict_ok": false,
+    "issues": [
+      {
+        "severity": "blocking",
+        "file": "jira_ticket.py",
+        "line": 196,
+        "description": "The cache key is ticket_id.rstrip('0123456789'), which strips all trailing digits from the key. That means PROJ-1 and PROJ-2 both map to 'PROJ-' and share a single cache entry. The first cached result (or None from a 404) will be returned for every other ticket in the same project, violating the acceptance criterion that different ticket keys are cached independently and must never return each other's cached result. Use the full ticket_id as the cache key, not a project-prefix-only value."
+      }
+    ],
+    "missing_requirements": [
+      "Cache must be keyed by the full ticket key so different ticket keys are cached independently and never return each other's result."
+    ],
+    "reasoning": "The diff adds an in-memory cache and correctly caches 404 'not found' results as None, but the cache key collapses all tickets sharing the same project prefix into one entry. This directly contradicts the explicit requirement that different ticket keys never share/return each other's cached result, and can cause the wrong ticket context or a false 'not found' to be served for sibling issues.",
+    "context_truncated": false,
+    "comment_posted": true
+  },
+  {
+    "pr_number": 6,
+    "pr_title": "SCRUM-12: Add core_remaining_pct to /debug/rate-limit",
+    "branch": "SCRUM-12-rate-limit-pct",
+    "ticket_key": "SCRUM-12",
+    "ticket_summary": "/debug/rate-limit should report both core and search remaining as percentages",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-12",
+    "seeded_mistake": "implements core_remaining_pct only; omits search_remaining_pct, the one the ticket calls out as mattering most",
+    "expected_verdict": "partial",
+    "bot_verdict": "partial",
+    "verdict_ok": true,
+    "issues": [
+      {
+        "severity": "blocking",
+        "file": "main.py",
+        "line": null,
+        "description": "The response never includes search_remaining_pct, which is an explicit acceptance criterion and described as the most important field. The diff computes and returns only core_remaining_pct."
+      },
+      {
+        "severity": "warning",
+        "file": "main.py",
+        "line": 148,
+        "description": "The expression uses core['remaining'] after checking only core.get('limit'). If the rate-limit payload ever contains a truthy limit but a missing remaining key, this raises KeyError. Use .get for both fields, consistent with the defensive resource access above."
+      }
+    ],
+    "missing_requirements": [
+      "Add search_remaining_pct to the /debug/rate-limit response, computed as search['remaining'] / search['limit'] * 100 and rounded to 1 decimal."
+    ],
+    "reasoning": "The diff implements core_remaining_pct correctly and preserves the core/search raw objects, satisfying part of the ticket. However, the search_remaining_pct field, which is explicitly required and called out as the most important, is completely missing. Therefore the change only partially satisfies the ticket.",
+    "context_truncated": false,
+    "comment_posted": true
+  },
+  {
+    "pr_number": 7,
+    "pr_title": "SCRUM-13: Warn at startup when GITHUB_WEBHOOK_SECRET is unset",
+    "branch": "SCRUM-13-webhook-secret-warning",
+    "ticket_key": "SCRUM-13",
+    "ticket_summary": "Log a startup warning when GITHUB_WEBHOOK_SECRET is unset",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-13",
+    "seeded_mistake": "warning logic is correct, but a hardcoded fallback for WEBHOOK_SECRET was added alongside it, committed to a public repo \u2014 a real security issue outside the ticket's literal ask",
+    "expected_verdict": "satisfies",
+    "bot_verdict": "partial",
+    "verdict_ok": false,
+    "issues": [
+      {
+        "severity": "blocking",
+        "file": "main.py",
+        "line": 25,
+        "description": "Replacing a missing GITHUB_WEBHOOK_SECRET with a hardcoded placeholder makes WEBHOOK_SECRET truthy. The ticket says the current behavior is to skip signature verification when the secret is unset; that skip is presumably driven by WEBHOOK_SECRET being falsy. After this change, _verify_signature will no longer skip checks but will verify against the literal placeholder, so valid GitHub webhook deliveries will be rejected (or unsigned ones rejected) in the exact scenario this PR is meant to warn about. It also makes the existing startup info log report the secret as \"set\" because it checks WEBHOOK_SECRET, while the new warning says it is unset \u2014 contradictory and misleading. Add the warning without changing WEBHOOK_SECRET's value."
+      }
+    ],
+    "missing_requirements": [
+      "Preserve the existing runtime behavior of skipping webhook signature verification when GITHUB_WEBHOOK_SECRET is unset; the ticket only asks for a startup warning, not a change to verification."
+    ],
+    "reasoning": "The diff does add a warning-level startup log when GITHUB_WEBHOOK_SECRET is unset, with a message that clearly states webhook signature checks are being skipped. However, it also introduces a placeholder default for WEBHOOK_SECRET, making the variable truthy when the env var is absent. This is inconsistent with the ticket description (which says the unset case currently skips verification) and will likely cause _verify_signature to attempt verification with a bogus secret instead of skipping it. The startup info log in the same lifespan will also now report the secret as set, contradicting the new warning. Therefore the ticket is only partially satisfied.",
+    "context_truncated": false,
+    "comment_posted": true
+  },
+  {
+    "pr_number": 8,
+    "pr_title": "SCRUM-14: Document LangSmith env vars in README",
+    "branch": "SCRUM-14-readme-langsmith-docs",
+    "ticket_key": "SCRUM-14",
+    "ticket_summary": "Document LANGSMITH_API_KEY / LANGSMITH_PROJECT in the README Setup section",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-14",
+    "seeded_mistake": "diff is entirely unrelated to the ticket (wrong branch pushed) \u2014 changes a local demo script's print limit, not the README",
+    "expected_verdict": "does_not_satisfy",
+    "bot_verdict": "does_not_satisfy",
+    "verdict_ok": true,
+    "issues": [],
+    "missing_requirements": [
+      "README environment variables list does not include LANGSMITH_API_KEY, LANGSMITH_TRACING, or LANGSMITH_PROJECT",
+      "No one-line explanations for the LangSmith variables were added",
+      "No changes were made to the README Setup/environment variables section at all"
+    ],
+    "reasoning": "The diff only changes the diff-preview character limit in fetch_real_pr_diff.py from 3000 to 5000 characters. It is entirely unrelated to the ticket, which asks for documenting LANGSMITH_API_KEY, LANGSMITH_TRACING, and LANGSMITH_PROJECT in the README's environment variables section. None of the acceptance criteria are addressed, and no README file is touched. The ticket is therefore not satisfied.",
+    "context_truncated": true,
+    "comment_posted": true
+  }
+]

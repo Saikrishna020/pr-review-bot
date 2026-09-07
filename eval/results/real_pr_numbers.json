@@ -1,0 +1,27 @@
+[
+  {
+    "branch": "SCRUM-10-debug-config",
+    "number": 4,
+    "url": "https://github.com/Saikrishna020/pr-review-bot/pull/4"
+  },
+  {
+    "branch": "SCRUM-11-jira-cache",
+    "number": 5,
+    "url": "https://github.com/Saikrishna020/pr-review-bot/pull/5"
+  },
+  {
+    "branch": "SCRUM-12-rate-limit-pct",
+    "number": 6,
+    "url": "https://github.com/Saikrishna020/pr-review-bot/pull/6"
+  },
+  {
+    "branch": "SCRUM-13-webhook-secret-warning",
+    "number": 7,
+    "url": "https://github.com/Saikrishna020/pr-review-bot/pull/7"
+  },
+  {
+    "branch": "SCRUM-14-readme-langsmith-docs",
+    "number": 8,
+    "url": "https://github.com/Saikrishna020/pr-review-bot/pull/8"
+  }
+]

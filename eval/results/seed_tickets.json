@@ -1,0 +1,37 @@
+[
+  {
+    "key": "SCRUM-10",
+    "url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-10",
+    "id": "seed-1-debug-config",
+    "summary": "Add GET /debug/config to report which optional integrations are active",
+    "expected_mistake": "none \u2014 fully correct implementation"
+  },
+  {
+    "key": "SCRUM-11",
+    "url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-11",
+    "id": "seed-2-jira-cache",
+    "summary": "Cache fetch_jira_ticket results in-memory to avoid duplicate fetches on webhook retries",
+    "expected_mistake": "cache key collides across different ticket keys sharing a project prefix"
+  },
+  {
+    "key": "SCRUM-12",
+    "url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-12",
+    "id": "seed-3-rate-limit-pct",
+    "summary": "/debug/rate-limit should report both core and search remaining as percentages",
+    "expected_mistake": "implements core_remaining_pct only, omits search_remaining_pct"
+  },
+  {
+    "key": "SCRUM-13",
+    "url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-13",
+    "id": "seed-4-webhook-secret-warning",
+    "summary": "Log a startup warning when GITHUB_WEBHOOK_SECRET is unset",
+    "expected_mistake": "adds a hardcoded fallback secret that silently defeats the warning and the security control"
+  },
+  {
+    "key": "SCRUM-14",
+    "url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-14",
+    "id": "seed-5-readme-langsmith-docs",
+    "summary": "Document LANGSMITH_API_KEY / LANGSMITH_PROJECT in the README Setup section",
+    "expected_mistake": "diff is unrelated to the ticket (wrong branch pushed)"
+  }
+]

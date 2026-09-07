@@ -41,21 +41,34 @@ def get_deepseek_client() -> OpenAI:
     if not api_key:
         raise RuntimeError("Set DEEPSEEK_API_KEY in .env before running this script.")
 
-    return OpenAI(
+    client = OpenAI(
         api_key=api_key,
         base_url="https://api.deepseek.com",
     )
+
+    # Trace every review call to LangSmith when configured; a bare client
+    # (no tracing) is the fallback so this never becomes a hard dependency.
+    if os.environ.get("LANGSMITH_API_KEY"):
+        from langsmith.wrappers import wrap_openai
+
+        return wrap_openai(client)
+    return client
 
 
 def review_pr(
     diff: str,
     context: RepoContext | None = None,
     ticket: JiraTicket | None = None,
+    trace_metadata: dict | None = None,
 ) -> ReviewResult:
     """One LLM call producing both the code review and the Jira verdict.
 
     When no ticket resolved, the Jira half is dropped from the prompt entirely
     and the verdict is set here rather than asked of the model.
+
+    `trace_metadata` is attached to the LangSmith run when tracing is on (e.g.
+    pr_number, ticket_key) so runs are identifiable in the UI; it's a no-op
+    otherwise.
     """
     client = get_deepseek_client()
 
@@ -66,6 +79,7 @@ def review_pr(
             {"role": "system", "content": build_system_prompt(ticket)},
             {"role": "user", "content": build_user_prompt(diff, context=context, ticket=ticket)},
         ],
+        langsmith_extra={"metadata": trace_metadata} if trace_metadata else None,
     )
 
     result = parse_review_result(response.choices[0].message.content)
@@ -187,7 +201,14 @@ def main() -> None:
     print("Sending diff + context + ticket to DeepSeek...")
     print()
 
-    result = review_pr(diff, context=context, ticket=ticket)
+    trace_metadata = {
+        "owner": TARGET_OWNER,
+        "repo": TARGET_REPO,
+        "pr_number": chosen_pr["number"],
+        "ticket_key": ticket.key if ticket else None,
+        "entry_point": "cli_script",
+    }
+    result = review_pr(diff, context=context, ticket=ticket, trace_metadata=trace_metadata)
     if result.error:
         print(f"Review degraded safely: {result.error}")
         print()
