@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from fetch_real_pr_diff import get_github_token, get_pr_diff, get_pr_head, github_headers, resolve_auth_token
+from fetch_real_pr_diff import get_file_content, get_github_token, get_pr_diff, get_pr_head, github_headers, resolve_auth_token
 from jira_ticket import JiraTicket, resolve_ticket_for_pr
 from pr_context import RepoContext, safe_build_context
 from review_real_pr import maybe_post_review, review_pr
@@ -148,6 +148,16 @@ def debug_rate_limit() -> dict:
         "core": resources.get("core", {}),
         "search": resources.get("search", {}),
     }
+
+
+@app.get("/debug/file")
+def debug_file(owner: str, repo: str, path: str, ref: str | None = None) -> dict:
+    """Preview one file's raw content, so a context-building question can be
+    checked without a local checkout."""
+    content = get_file_content(owner, repo, path, ref=ref)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File not found at that ref.")
+    return {"owner": owner, "repo": repo, "path": path, "ref": ref, "content": content}
 
 
 @app.post("/review")
