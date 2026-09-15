@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from fetch_real_pr_diff import get_github_token, get_pr_diff, get_pr_head, github_headers, resolve_auth_token
-from jira_ticket import JiraTicket, resolve_ticket_for_pr
+from jira_ticket import JiraTicket, get_jira_config, resolve_ticket_for_pr
 from pr_context import RepoContext, safe_build_context
 from review_real_pr import maybe_post_review, review_pr
 
@@ -147,6 +147,19 @@ def debug_rate_limit() -> dict:
         "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7],
         "core": resources.get("core", {}),
         "search": resources.get("search", {}),
+    }
+
+
+@app.get("/debug/config")
+def debug_config() -> dict:
+    """Which optional integrations are active, for a quick sanity check without
+    reading .env by hand. Booleans only — never the actual secret values."""
+    return {
+        "jira_configured": get_jira_config() is not None,
+        "github_app_configured": bool(os.environ.get("GITHUB_APP_ID")),
+        "langsmith_tracing_enabled": os.environ.get("LANGSMITH_TRACING", "").strip().lower() == "true",
+        "target_owner": os.environ.get("TARGET_OWNER", "unset"),
+        "target_repo": os.environ.get("TARGET_REPO", "unset"),
     }
 
 
