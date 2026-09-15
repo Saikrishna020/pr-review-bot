@@ -18,6 +18,7 @@ LANGSMITH_PROJECT = "pr-review-bot"
 
 VERDICT_LABEL = {
     "satisfies": "✅ Satisfies",
+    "satisfies_with_concerns": "⚠️ Satisfies, but with a blocking concern",
     "partial": "🟡 Partial",
     "does_not_satisfy": "❌ Does not satisfy",
     "no_ticket_linked": "⚪ No ticket linked",

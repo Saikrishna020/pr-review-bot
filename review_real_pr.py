@@ -89,6 +89,13 @@ def review_pr(
         result.jira_verdict = "no_ticket_linked"
         result.missing_requirements = []
 
+    # Enforced in code, not just requested in the prompt (SCRUM-16): the model
+    # can forget an instruction, but "issues" and "jira_verdict" are both
+    # already in front of us, so a clean "satisfies" alongside a "blocking"
+    # issue is a checkable inconsistency, not a judgment call to trust it on.
+    if result.jira_verdict == "satisfies" and any(issue.severity == "blocking" for issue in result.issues):
+        result.jira_verdict = "satisfies_with_concerns"
+
     # The model can't know what context it wasn't shown, so this is set from
     # the pipeline rather than trusted from the response.
     result.context_truncated = bool(context and context.truncated)
@@ -100,6 +107,7 @@ SEVERITY_EMOJI = {"blocking": "🔴", "warning": "🟡", "note": "🟢"}
 
 VERDICT_DISPLAY = {
     "satisfies": ("✅", "Satisfies the ticket"),
+    "satisfies_with_concerns": ("⚠️", "Satisfies the ticket, but has a blocking concern — do not merge as-is"),
     "partial": ("🟡", "Partially satisfies the ticket"),
     "does_not_satisfy": ("❌", "Does not satisfy the ticket"),
     "no_ticket_linked": ("⚪", "No Jira ticket linked"),

@@ -1,14 +1,14 @@
 {
-  "run_at": "2026-09-04T05:31:17.311487+00:00",
+  "run_at": "2026-09-15T04:32:20.658843+00:00",
   "jira_alignment": {
     "cases": [
       {
         "id": "scrum1-fully-implemented",
         "skipped": false,
-        "verdict_ok": true,
+        "verdict_ok": false,
         "checks_ok": true,
         "false_satisfies": false,
-        "false_negative": false,
+        "false_negative": true,
         "is_stress_test": false
       },
       {
@@ -57,7 +57,7 @@
         "is_stress_test": false
       }
     ],
-    "passed": 6,
+    "passed": 5,
     "total": 6,
     "false_satisfies": []
   },
@@ -93,8 +93,8 @@
       },
       {
         "id": "correct-refactor",
-        "passed": true,
-        "false_positive": false,
+        "passed": false,
+        "false_positive": true,
         "missed": false,
         "is_stress_test": true
       },
@@ -106,17 +106,18 @@
         "is_stress_test": false
       }
     ],
-    "passed": 4,
+    "passed": 3,
     "total": 6,
     "false_positives": [
-      "clean-rename"
+      "clean-rename",
+      "correct-refactor"
     ],
     "missed": [
       "style-nit"
     ]
   },
   "overall": {
-    "passed": 10,
+    "passed": 8,
     "total": 12
   }
 }

@@ -120,5 +120,35 @@
     "reasoning": "The diff only changes the diff-preview character limit in fetch_real_pr_diff.py from 3000 to 5000 characters. It is entirely unrelated to the ticket, which asks for documenting LANGSMITH_API_KEY, LANGSMITH_TRACING, and LANGSMITH_PROJECT in the README's environment variables section. None of the acceptance criteria are addressed, and no README file is touched. The ticket is therefore not satisfied.",
     "context_truncated": true,
     "comment_posted": true
+  },
+  {
+    "pr_number": 9,
+    "pr_title": "SCRUM-15: Add GET /debug/file to preview a file for context-building diagnosis",
+    "branch": "SCRUM-15-debug-file-preview",
+    "ticket_key": "SCRUM-15",
+    "ticket_summary": "Add GET /debug/file to preview a file for context-building diagnosis",
+    "ticket_url": "https://saikrishnaaakash.atlassian.net/browse/SCRUM-15",
+    "seeded_mistake": "new debug endpoint reads files using the bot's own GitHub credentials with no auth/authorization check and fully caller-controlled owner/repo \u2014 not stated in the ticket, meant to test whether the bot infers the expectation from context",
+    "expected_verdict": "satisfies_with_concerns",
+    "bot_verdict": "satisfies_with_concerns",
+    "verdict_ok": true,
+    "issues": [
+      {
+        "severity": "blocking",
+        "file": "main.py",
+        "line": 154,
+        "description": "The new GET /debug/file endpoint is unauthenticated and takes fully caller-controlled owner/repo/path/ref, then returns the raw bytes of whatever file is requested using the server's GitHub credentials (get_file_content -> get_github_token/github_headers). Any client that can reach this service can therefore read arbitrary files from any repository the server's token can access, including private repos, with no signature/AuthZ check. This is a broader data-exposure surface than the existing debug_* endpoints, which only echo the server's own auth/rate-limit status and take no caller input. The endpoint needs an authentication/authorization gate (or an allow-list of repos) before it can ship."
+      },
+      {
+        "severity": "warning",
+        "file": "main.py",
+        "line": 158,
+        "description": "get_file_content returning None is treated as a blanket 404 'File not found at that ref.' If the upstream GitHub call failed for another reason (bad/expired token, insufficient scope, rate limiting, non-2xx other than 404), the caller gets a misleading 'not found' instead of the real failure. Since the entire purpose of this endpoint is diagnosing why context-building missed a file, a misreported cause defeats the feature. Consider surfacing the upstream status via the existing _github_error_detail-style handling so the diagnosing engineer can tell 'missing file' from 'auth/rate-limit problem'."
+      }
+    ],
+    "missing_requirements": [],
+    "reasoning": "The diff does implement the literal ask: a read-only GET /debug/file that returns a single file's raw text content, so support can inspect a file without a local checkout. However it exposes an unauthenticated, fully parameterized file-read primitive backed by the server's GitHub token (blocking), and its error handling collapses all upstream failures into a misleading 404, which undercuts its diagnostic purpose. Requirements are met, but this should not merge as-is.",
+    "context_truncated": false,
+    "comment_posted": true
   }
 ]

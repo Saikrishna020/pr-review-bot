@@ -31,7 +31,12 @@ _GROUNDING_RULES = (
     "the behavior seems well-known to you — your training data may be stale or wrong for the "
     "exact version in this PR. If a potential issue depends on external behavior you cannot "
     "verify, either omit it or phrase it as a question to verify rather than an assertion. "
-    "Never state as fact something you are inferring rather than reading."
+    "Never state as fact something you are inferring rather than reading.\n\n"
+    "Severity calibration: missing authentication/authorization that lets data be read or "
+    "written beyond its intended scope (e.g. a shared credential reaching resources the "
+    "caller shouldn't be able to reach) is \"blocking\" by default, not \"warning\" — even if a "
+    "similar gap already exists elsewhere in the codebase. An existing gap is a reason to also "
+    "flag the older instance, not a reason to rate a new, more sensitive instance lower."
 )
 
 _SCHEMA_RULES = (
@@ -41,12 +46,15 @@ _SCHEMA_RULES = (
     '    {"severity": "blocking|warning|note", "file": "path/to/file.py", "line": 123, '
     '"description": "what is wrong and why"}\n'
     "  ],\n"
-    '  "jira_verdict": "satisfies|partial|does_not_satisfy",\n'
+    '  "jira_verdict": "satisfies|satisfies_with_concerns|partial|does_not_satisfy",\n'
     '  "missing_requirements": ["requirement the diff does not cover"],\n'
     '  "reasoning": "brief explanation of the verdict"\n'
     "}\n"
     'Use an empty list for "issues" if you find none. "line" may be null if a finding '
-    "isn't tied to a specific line."
+    "isn't tied to a specific line. \"satisfies_with_concerns\" means every stated requirement "
+    "is met AND at least one \"blocking\" severity issue exists in \"issues\" — the ticket's ask "
+    "is done, but this should not ship as-is. Never answer a clean \"satisfies\" when \"issues\" "
+    "contains a \"blocking\" entry."
 )
 
 _CODE_ONLY_SCHEMA_RULES = (
@@ -79,6 +87,9 @@ _ALIGNMENT_RULES = (
     "requirement, not merely a code-quality note.\n"
     "   - If the diff appears unrelated to the ticket entirely, answer \"does_not_satisfy\" and "
     "say so explicitly in your reasoning — that usually means the wrong ticket was linked.\n"
+    "   - If every requirement is met but \"issues\" contains a \"blocking\" entry, answer "
+    "\"satisfies_with_concerns\", not \"satisfies\" — a clean \"satisfies\" promises this is safe "
+    "to merge as-is, which isn't true when a blocking issue is open.\n"
     "   - List every unmet requirement in \"missing_requirements\"."
 )
 

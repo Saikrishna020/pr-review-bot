@@ -1,16 +1,16 @@
 # Golden-set eval results
 
-Run at: 2026-09-04T05:31:17.311487+00:00
+Run at: 2026-09-15T04:32:20.658843+00:00
 
-**Overall: 10/12**
+**Overall: 8/12**
 
 ## Jira alignment
 
-6/6 verdicts correct.
+5/6 verdicts correct.
 
 | Case | Ticket | Verdict OK | Extra checks OK |
 |---|---|---|---|
-| scrum1-fully-implemented | ✅ | ✅ |
+| scrum1-fully-implemented | ❌ | ✅ |
 | scrum2-unrelated-diff | ✅ | ✅ |
 | scrum3-two-of-three | ✅ | ✅ |
 | scrum4-buried-edge-case | ✅ | ✅ |
@@ -19,8 +19,8 @@ Run at: 2026-09-04T05:31:17.311487+00:00
 
 ## Issue detection
 
-4/6 cases passed.
-False positives: clean-rename
+3/6 cases passed.
+False positives: clean-rename, correct-refactor
 Missed real issues: style-nit
 
 | Case | Passed |
@@ -29,5 +29,5 @@ Missed real issues: style-nit
 | off-by-one | ✅ |
 | null-crash | ✅ |
 | style-nit | ❌ |
-| correct-refactor | ✅ |
+| correct-refactor | ❌ |
 | hardcoded-secret | ✅ |

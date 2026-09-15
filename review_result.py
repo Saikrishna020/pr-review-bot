@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 Severity = Literal["blocking", "warning", "note"]
-JiraVerdict = Literal["satisfies", "partial", "does_not_satisfy", "no_ticket_linked"]
+JiraVerdict = Literal["satisfies", "satisfies_with_concerns", "partial", "does_not_satisfy", "no_ticket_linked"]
 
 
 class Issue(BaseModel):

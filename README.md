@@ -94,6 +94,14 @@ Golden-set cases above run in isolation (`context=None`) by design. As a complem
 
 All 5 seeded conditions were caught. Full reasoning, every issue's exact text, and per-case LangSmith trace pointers are in [`eval/results/TICKET_REPORT.md`](eval/results/TICKET_REPORT.md); raw structured results in [`eval/results/`](eval/results/).
 
+### Flagship case: an unstated security expectation, caught anyway
+
+[SCRUM-15](https://github.com/Saikrishna020/pr-review-bot/pull/9) asked for a debug endpoint that previews one file's content — nothing about authentication or scope was mentioned in the ticket. The bot flagged it as `blocking` anyway: *"exposes arbitrary repository file contents accessible to the server token... this new instance should at minimum be gated behind an API key or admin-only guard before it ships."* It inferred the security expectation from context — this is a `/debug/*` endpoint, the existing ones only echo status booleans, this one returns raw file content using the bot's own GitHub credentials — rather than checking off an explicit requirement.
+
+That run also surfaced a real gap: the reviewer rated the same finding `warning` on its first pass, and the Jira verdict stayed a clean `satisfies` even with a blocking-shaped issue open. [SCRUM-16](https://github.com/Saikrishna020/pr-review-bot/pull/9#issuecomment-5674784669) fixed this — `jira_verdict` gained a `satisfies_with_concerns` value, enforced deterministically in code (`review_pr()`: any `blocking` issue forces the verdict off a clean `satisfies`, not just requested in the prompt), plus explicit severity-calibration guidance: *missing authorization that exposes data beyond its intended scope is blocking by default, even if a similar gap already exists elsewhere in the codebase.* Re-run after the fix, the same diff came back `blocking` + `satisfies_with_concerns`, with the model's own reasoning citing the new rule directly.
+
+Known trade-off from that change: the issue-detection golden set's false-positive stress case (`correct-refactor`) got slightly noisier post-change (see [`eval/results/golden_set_results.md`](eval/results/golden_set_results.md)) — not caused by the new severity rule (which is scoped to auth/authorization), most likely ordinary run-to-run variance in a non-deterministic model, but recorded here rather than hidden.
+
 ## Project layout
 
 | File | Purpose |

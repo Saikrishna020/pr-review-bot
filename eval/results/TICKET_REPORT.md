@@ -1,8 +1,8 @@
 # PR Review Bot — real-PR ticket report
 
-5 real PRs, each linked to a real Jira ticket in the SCRUM sandbox, each seeded with one realistic dev mistake decided before the diff was written. Reviewed through the actual pipeline (real diff, real Phase 2 context, real Jira fetch, real posted GitHub comment).
+6 real PRs, each linked to a real Jira ticket in the SCRUM sandbox, each seeded with one realistic dev mistake decided before the diff was written. Reviewed through the actual pipeline (real diff, real Phase 2 context, real Jira fetch, real posted GitHub comment).
 
-**Every seeded condition (5/5) was caught or correctly recognized as clean.**
+**Every seeded condition (6/6) was caught or correctly recognized as clean.**
 
 For the LLM's actual reasoning trace (prompt sent, raw structured output, token usage, latency) per case, open the **pr-review-bot** project in LangSmith and filter by the metadata field noted under each ticket below.
 
@@ -125,6 +125,28 @@ For the LLM's actual reasoning trace (prompt sent, raw structured output, token 
 **Bot's reasoning:** The diff only changes the diff-preview character limit in fetch_real_pr_diff.py from 3000 to 5000 characters. It is entirely unrelated to the ticket, which asks for documenting LANGSMITH_API_KEY, LANGSMITH_TRACING, and LANGSMITH_PROJECT in the README's environment variables section. None of the acceptance criteria are addressed, and no README file is touched. The ticket is therefore not satisfied.
 
 ⚠️ Phase 2 context was truncated for this review (lookup caps hit) — the verdict above was made from a knowingly incomplete view of the codebase.
+
+**How well did it do:** The seeded mistake was caught, with a verdict/severity that reflects its real impact.
+
+---
+
+## SCRUM-15 — Add GET /debug/file to preview a file for context-building diagnosis
+
+- Ticket: [SCRUM-15](https://saikrishnaaakash.atlassian.net/browse/SCRUM-15)
+- PR: [#9 — SCRUM-15: Add GET /debug/file to preview a file for context-building diagnosis](https://github.com/Saikrishna020/pr-review-bot/pull/9)
+- Branch: `SCRUM-15-debug-file-preview`
+- LangSmith: project **pr-review-bot**, filter `metadata.pr_number = 9` (or `metadata.ticket_key = "SCRUM-15"`)
+
+**What was seeded (decided before the diff was written):** new debug endpoint reads files using the bot's own GitHub credentials with no auth/authorization check and fully caller-controlled owner/repo — not stated in the ticket, meant to test whether the bot infers the expectation from context
+
+**Bot's verdict:** ⚠️ Satisfies, but with a blocking concern (expected `satisfies_with_concerns`, matched the pre-registered expectation)
+
+**Code issues found (2):**
+
+- **[BLOCKING]** `main.py:154` — The new GET /debug/file endpoint is unauthenticated and takes fully caller-controlled owner/repo/path/ref, then returns the raw bytes of whatever file is requested using the server's GitHub credentials (get_file_content -> get_github_token/github_headers). Any client that can reach this service can therefore read arbitrary files from any repository the server's token can access, including private repos, with no signature/AuthZ check. This is a broader data-exposure surface than the existing debug_* endpoints, which only echo the server's own auth/rate-limit status and take no caller input. The endpoint needs an authentication/authorization gate (or an allow-list of repos) before it can ship.
+- **[WARNING]** `main.py:158` — get_file_content returning None is treated as a blanket 404 'File not found at that ref.' If the upstream GitHub call failed for another reason (bad/expired token, insufficient scope, rate limiting, non-2xx other than 404), the caller gets a misleading 'not found' instead of the real failure. Since the entire purpose of this endpoint is diagnosing why context-building missed a file, a misreported cause defeats the feature. Consider surfacing the upstream status via the existing _github_error_detail-style handling so the diagnosing engineer can tell 'missing file' from 'auth/rate-limit problem'.
+
+**Bot's reasoning:** The diff does implement the literal ask: a read-only GET /debug/file that returns a single file's raw text content, so support can inspect a file without a local checkout. However it exposes an unauthenticated, fully parameterized file-read primitive backed by the server's GitHub token (blocking), and its error handling collapses all upstream failures into a misleading 404, which undercuts its diagnostic purpose. Requirements are met, but this should not merge as-is.
 
 **How well did it do:** The seeded mistake was caught, with a verdict/severity that reflects its real impact.
 
